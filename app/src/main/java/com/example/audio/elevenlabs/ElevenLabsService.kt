@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -48,6 +49,7 @@ class ElevenLabsService(private val context: Context) {
         }
 
     companion object {
+        private val generationLock = kotlinx.coroutines.sync.Mutex()
         private val _logs = MutableStateFlow<List<GenerationLogEntry>>(emptyList())
         val logs: StateFlow<List<GenerationLogEntry>> = _logs.asStateFlow()
 
@@ -91,6 +93,7 @@ class ElevenLabsService(private val context: Context) {
     }
 
     fun hasValidApiKey(): Boolean {
+        if (BuildConfig.VOICE_SERVICE_URL.startsWith("https://")) return true
         val key = getApiKey().trim()
         return key.isNotEmpty() && key != "null" && !key.contains("MY_")
     }
@@ -121,7 +124,7 @@ class ElevenLabsService(private val context: Context) {
      */
     suspend fun testConnection(): Result<String> = withContext(Dispatchers.IO) {
         val apiKey = getApiKey().trim()
-        if (apiKey.isEmpty() || apiKey == "null" || apiKey.contains("MY_")) {
+        if (!hasValidApiKey()) {
             val missingMsg = "المفتاح مفقود: لم يتم ضبط ELEVENLABS_API_KEY في لوحة Secrets أو ملف .env"
             recordLog("فحص الاتصال", success = false, statusCode = null, message = missingMsg)
             return@withContext Result.failure(IllegalStateException(missingMsg))
@@ -184,7 +187,7 @@ class ElevenLabsService(private val context: Context) {
         text: String,
         settings: ElevenLabsSettings = configManager.getSettings(),
         forceRegenerate: Boolean = false
-    ): Result<File> = withContext(Dispatchers.IO) {
+    ): Result<File> = generationLock.withLock { withContext(Dispatchers.IO) {
         val cleanText = text.trim()
         if (cleanText.isEmpty()) {
             val err = "النص فارغ"
@@ -199,7 +202,7 @@ class ElevenLabsService(private val context: Context) {
         }
 
         val apiKey = getApiKey().trim()
-        if (apiKey.isEmpty() || apiKey == "null" || apiKey.contains("MY_")) {
+        if (!hasValidApiKey()) {
             val missingMsg = "المفتاح مفقود: لم يتم ضبط ELEVENLABS_API_KEY في لوحة Secrets أو ملف .env"
             recordLog(cleanText, success = false, statusCode = null, message = missingMsg)
             return@withContext Result.failure(IllegalStateException(missingMsg))
@@ -209,7 +212,9 @@ class ElevenLabsService(private val context: Context) {
         val outputFile = File(cacheDir, "el_$targetKey.mp3")
 
         try {
-            val url = "https://api.elevenlabs.io/v1/text-to-speech/${settings.voiceId.trim()}"
+            val proxy = BuildConfig.VOICE_SERVICE_URL.trim()
+            val useProxy = proxy.startsWith("https://")
+            val url = if (useProxy) proxy else "https://api.elevenlabs.io/v1/text-to-speech/${settings.voiceId.trim()}"
 
             val jsonBody = JSONObject().apply {
                 put("text", cleanText)
@@ -227,7 +232,7 @@ class ElevenLabsService(private val context: Context) {
 
             val request = Request.Builder()
                 .url(url)
-                .addHeader("xi-api-key", apiKey)
+                .apply { if (!useProxy) addHeader("xi-api-key", apiKey) }
                 .addHeader("Accept", "audio/mpeg")
                 .addHeader("Content-Type", "application/json")
                 .post(requestBody)
@@ -241,37 +246,45 @@ class ElevenLabsService(private val context: Context) {
                 return@withContext Result.failure(Exception(netMsg))
             }
 
-            if (!response.isSuccessful) {
-                val code = response.code
-                val rawBody = response.body?.string() ?: ""
-                val serverDetail = extractServerDetail(rawBody)
-                val fullErrorMsg = "رمز $code: $serverDetail"
-                recordLog(cleanText, success = false, statusCode = code, message = fullErrorMsg)
-                return@withContext Result.failure(Exception(fullErrorMsg))
+            response.use {
+                if (!response.isSuccessful) {
+                    val code = response.code
+                    val rawBody = response.body?.string() ?: ""
+                    val serverDetail = extractServerDetail(rawBody)
+                    val fullErrorMsg = "رمز $code: $serverDetail"
+                    recordLog(cleanText, success = false, statusCode = code, message = fullErrorMsg)
+                    return@withContext Result.failure(Exception(fullErrorMsg))
+                }
+
+                val bytes = response.body?.bytes()
+                if (bytes == null || bytes.isEmpty()) {
+                    val emptyMsg = "استجابة ElevenLabs لا تحتوي على بيانات صوتية (200 OK فارغ)"
+                    recordLog(cleanText, success = false, statusCode = 200, message = emptyMsg)
+                    return@withContext Result.failure(Exception(emptyMsg))
+                }
+
+                val temporary = File.createTempFile("speech_", ".tmp", cacheDir)
+                try {
+                    temporary.writeBytes(bytes)
+                    check(temporary.renameTo(outputFile)) { "تعذّر حفظ الصوت" }
+                } finally { temporary.delete() }
+
+                configManager.recordCharactersUsed(cleanText.length)
+                val successMsg = "تم توليد الصوت بنجاح (${cleanText.length} حرف)"
+                recordLog(cleanText, success = true, statusCode = 200, message = successMsg)
+
+                Result.success(outputFile)
             }
-
-            val bytes = response.body?.bytes()
-            if (bytes == null || bytes.isEmpty()) {
-                val emptyMsg = "استجابة ElevenLabs لا تحتوي على بيانات صوتية (200 OK فارغ)"
-                recordLog(cleanText, success = false, statusCode = 200, message = emptyMsg)
-                return@withContext Result.failure(Exception(emptyMsg))
-            }
-
-            outputFile.outputStream().use { fos ->
-                fos.write(bytes)
-            }
-
-            configManager.recordCharactersUsed(cleanText.length)
-            val successMsg = "تم توليد الصوت بنجاح (${cleanText.length} حرف)"
-            recordLog(cleanText, success = true, statusCode = 200, message = successMsg)
-
-            Result.success(outputFile)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Log.e("ElevenLabsService", "Generation failed", e)
             val unexpectedMsg = e.message ?: "خطأ غير متوقع أثناء التوليد"
             recordLog(cleanText, success = false, statusCode = null, message = unexpectedMsg)
             Result.failure(e)
         }
+    }
+
     }
 
     private fun extractServerDetail(rawBody: String): String {

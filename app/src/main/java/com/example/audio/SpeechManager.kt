@@ -19,6 +19,26 @@ class SpeechManager(private val context: Context) {
     val recorderHelper = AudioRecorderHelper(context)
     val elevenLabsService = ElevenLabsService(context)
 
+    /** Fixed game phrases ship in assets/game_audio and never call a remote service. */
+    fun playBundled(id: String, volume: Float = 1f, onFinished: (() -> Unit)? = null) {
+        val file = try {
+            val target = File(context.cacheDir, "bundled_audio/${com.example.BuildConfig.VERSION_CODE}/$id.mp3")
+            if (!target.exists()) {
+                target.parentFile?.mkdirs()
+                val temporary = File.createTempFile("bundle_", ".tmp", target.parentFile)
+                try {
+                    context.assets.open("game_audio/$id.mp3").use { input ->
+                        temporary.outputStream().use { input.copyTo(it) }
+                    }
+                    if (!temporary.renameTo(target)) throw java.io.IOException("Could not cache game audio")
+                } finally { temporary.delete() }
+            }
+            target.takeIf { it.length() > 0 }
+        } catch (_: java.io.IOException) { null }
+        if (file == null) onFinished?.invoke()
+        else recorderHelper.playAudio(file.absolutePath, volume) { onFinished?.invoke() }
+    }
+
     /**
      * Plays a specific CustomSoundSlot respecting the strict priority:
      * 1. Uploaded Audio File -> 2. Microphone Recording -> 3. ElevenLabs Generated Audio
@@ -70,6 +90,12 @@ class SpeechManager(private val context: Context) {
                 }
                 return
             }
+        }
+
+        // Bundled defaults are shared by every installation; dynamic names use the disk cache.
+        if (slot.category != SoundSlotCategory.TURN_START && slot.category != SoundSlotCategory.CUSTOM) {
+            playBundled(slot.id, effVolume, onFinished)
+            return
         }
 
         // 4. Check for ElevenLabs Generated Audio for this specific text (disk cache match)

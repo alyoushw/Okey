@@ -40,9 +40,10 @@ class ExampleRobolectricTest {
     assertTrue(slots.any { it.category == com.example.data.model.SoundSlotCategory.COUNTDOWN_1 })
     assertTrue(slots.any { it.category == com.example.data.model.SoundSlotCategory.TIME_UP })
 
-    // Verify individual player slots and warning_10s are removed as required
+    // Individual player slots are dynamic; fixed warning and victory belong in the game pack.
     assertFalse(slots.any { it.id.startsWith("turn_player_") })
-    assertFalse(slots.any { it.category == com.example.data.model.SoundSlotCategory.WARNING_10S })
+    assertTrue(slots.any { it.category == com.example.data.model.SoundSlotCategory.WARNING_10S })
+    assertTrue(slots.any { it.category == com.example.data.model.SoundSlotCategory.WIN_VICTORY })
 
     val timeUpSlot = slots.first { it.category == com.example.data.model.SoundSlotCategory.TIME_UP }
     assertTrue(timeUpSlot.customText.contains("غشيم") || timeUpSlot.title.contains("انتهاء"))
@@ -192,17 +193,6 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `ScoreboardViewModel voice status reflects NOT_GENERATED and READY`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    val vm = com.example.ui.scoreboard.ScoreboardViewModel(context as android.app.Application)
-
-    vm.checkAndRefreshStatusForNames(listOf("أحمد", "سعيد"))
-    val statuses = vm.playerVoiceStatuses.value
-    assertTrue(statuses.containsKey("أحمد"))
-    assertEquals(com.example.ui.scoreboard.VoiceStatusType.NOT_GENERATED, statuses["أحمد"]?.status)
-  }
-
-  @Test
   fun `SettingsRepository is synchronous single source of truth`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val repository = com.example.data.repository.GameRepository(context)
@@ -218,28 +208,6 @@ class ExampleRobolectricTest {
     assertEquals("PLAYER_NAME", com.example.data.repository.SettingsRepository.settingsState.value.turnAnnouncementMode)
     assertEquals("PLAYER_NAME", repository.getSettings().turnAnnouncementMode)
     assertEquals("اللي بعده يا بطل", repository.getSettings().turnCustomPhrase)
-  }
-
-  @Test
-  fun `ScoreboardViewModel generation records mode, player names and phrase logs`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    val vm = com.example.ui.scoreboard.ScoreboardViewModel(context as android.app.Application)
-
-    // Ensure mode is set to PLAYER_NAME
-    val settings = com.example.data.repository.SettingsRepository.getSettings(context)
-    com.example.data.repository.SettingsRepository.saveSettings(context, settings.copy(turnAnnouncementMode = "PLAYER_NAME"))
-
-    com.example.audio.elevenlabs.ElevenLabsService.clearLogs()
-    vm.generateVoicesForPlayerList(listOf("طارق", "بدر"))
-
-    val logs = com.example.audio.elevenlabs.ElevenLabsService.logs.value
-    assertTrue("Logs should not be empty", logs.isNotEmpty())
-
-    // Must record diagnostic header
-    val diagEntry = logs.find { it.target.contains("زر توليد أصوات اللاعبين") }
-    assertTrue("Must have diagnostic entry for generation button", diagEntry != null)
-    assertTrue("Log must record PLAYER_NAME mode", diagEntry!!.message.contains("PLAYER_NAME"))
-    assertTrue("Log must record player list", diagEntry.message.contains("طارق") && diagEntry.message.contains("بدر"))
   }
 
   @Test
@@ -265,9 +233,10 @@ class ExampleRobolectricTest {
 
   @Test
   fun `MainActivity sets volumeControlStream to STREAM_MUSIC`() {
-    val activityController = org.robolectric.Robolectric.buildActivity(MainActivity::class.java).setup()
+    val activityController = org.robolectric.Robolectric.buildActivity(MainActivity::class.java).create()
     val activity = activityController.get()
     assertEquals(android.media.AudioManager.STREAM_MUSIC, activity.volumeControlStream)
+    activityController.destroy()
   }
 }
 

@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.SoundPool
 import android.util.Log
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -66,9 +67,9 @@ class SoundPlayer(private val context: Context) {
         masterVolume: Float = 1.0f,
         muteAll: Boolean = false
     ) {
-        if (!enabled || muteAll) return
+        if (!enabled || muteAll || masterVolume <= 0f) return
 
-        val effVol = (volumeFactor * masterVolume).coerceIn(0.02f, 1.0f)
+        val effVol = (volumeFactor * masterVolume).coerceIn(0f, 1f)
         val finalPitch = (if (isUrgent && pitchFactor == 1.0f) 1.06f else pitchFactor).coerceIn(0.5f, 2.0f)
 
         val soundId = when (toneType) {
@@ -89,8 +90,8 @@ class SoundPlayer(private val context: Context) {
         masterVolume: Float = 1.0f,
         muteAll: Boolean = false
     ) {
-        if (!enabled || muteAll) return
-        val effVol = (volumeFactor * masterVolume).coerceIn(0.05f, 1.0f)
+        if (!enabled || muteAll || masterVolume <= 0f) return
+        val effVol = (volumeFactor * masterVolume).coerceIn(0f, 1f)
         val soundId = if (soundDigitalUrgent != 0) soundDigitalUrgent else soundClassic
         if (soundId != 0) {
             soundPool.play(soundId, effVol, effVol, 2, 0, 1.15f)
@@ -98,16 +99,16 @@ class SoundPlayer(private val context: Context) {
     }
 
     fun playTimeUp(enabled: Boolean, masterVolume: Float = 1.0f, muteAll: Boolean = false) {
-        if (!enabled || muteAll) return
-        val vol = masterVolume.coerceIn(0.1f, 1.0f)
+        if (!enabled || muteAll || masterVolume <= 0f) return
+        val vol = masterVolume.coerceIn(0f, 1f)
         if (soundTimeUp != 0) {
             soundPool.play(soundTimeUp, vol, vol, 3, 0, 1.0f)
         }
     }
 
     fun playCelebrationFanfare(enabled: Boolean, masterVolume: Float = 1.0f, muteAll: Boolean = false) {
-        if (!enabled || muteAll) return
-        val vol = masterVolume.coerceIn(0.1f, 1.0f)
+        if (!enabled || muteAll || masterVolume <= 0f) return
+        val vol = masterVolume.coerceIn(0f, 1f)
         if (soundFanfare != 0) {
             soundPool.play(soundFanfare, vol, vol, 2, 0, 1.0f)
         }
@@ -173,6 +174,15 @@ class SoundPlayer(private val context: Context) {
     }
 
     private fun writePcmToWav(file: File, pcm: ShortArray, sampleRate: Int) {
+        if (file.length() == pcm.size * 2L + 44L) return
+        val temporary = File.createTempFile("effect_", ".wav", context.cacheDir)
+        try {
+            writeWaveData(temporary, pcm, sampleRate)
+            check(temporary.renameTo(file)) { "Could not cache sound effect" }
+        } finally { temporary.delete() }
+    }
+
+    private fun writeWaveData(file: File, pcm: ShortArray, sampleRate: Int) {
         val totalAudioLen = pcm.size * 2
         val totalDataLen = totalAudioLen + 36
         val channels = 1
@@ -236,6 +246,7 @@ class SoundPlayer(private val context: Context) {
     }
 
     fun release() {
+        scope.cancel()
         try {
             soundPool.release()
         } catch (_: Exception) {}

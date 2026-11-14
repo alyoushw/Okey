@@ -1,5 +1,7 @@
 package com.example.ui.scoreboard
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -85,6 +87,7 @@ fun ScoreInputDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -98,8 +101,9 @@ fun ScoreInputDialog(
                     Icon(Icons.Default.Close, contentDescription = "إغلاق")
                 }
                 Text(
-                    text = "تسجيل نقاط الجولة $roundNumber",
-                    style = MaterialTheme.typography.titleLarge,
+                    text = "نقاط الجولة $roundNumber",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Button(
@@ -277,7 +281,7 @@ fun ScoreInputDialog(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("صفر (فائز)", fontWeight = FontWeight.Bold)
+                        Text("صفر", fontWeight = FontWeight.Bold)
                     }
 
                     // Next Player in list
@@ -292,7 +296,7 @@ fun ScoreInputDialog(
                         modifier = Modifier.weight(1.5f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("اللاعب التالي ←", fontWeight = FontWeight.Bold)
+                        Text("اللاعب التالي", fontWeight = FontWeight.Bold)
                     }
                 }
             }
