@@ -110,11 +110,19 @@ dependencies {
 // A public release must include the complete offline game voice pack.
 val bundledGameAudio = listOf("turn_start", "warning_10s", "countdown_5", "countdown_4", "countdown_3", "countdown_2", "countdown_1", "time_up", "victory")
   .map { layout.projectDirectory.file("src/main/assets/game_audio/$it.mp3").asFile }
-val verifyGameAudio by tasks.registering {
-  inputs.files(bundledGameAudio)
-  doLast {
-    val missing = bundledGameAudio.filter { !it.isFile || it.length() == 0L }.map { it.name }
+@org.gradle.work.DisableCachingByDefault(because = "Validates release inputs without producing outputs")
+abstract class VerifyGameAudio : DefaultTask() {
+  @get:InputFiles
+  @get:PathSensitive(PathSensitivity.RELATIVE)
+  abstract val audioFiles: ConfigurableFileCollection
+
+  @TaskAction
+  fun verify() {
+    val missing = audioFiles.files.filter { !it.isFile || it.length() == 0L }.map { it.name }
     check(missing.isEmpty()) { "Missing bundled game audio: ${missing.joinToString()}. Run scripts/generate_game_audio.py before release." }
   }
+}
+val verifyGameAudio by tasks.registering(VerifyGameAudio::class) {
+  audioFiles.from(bundledGameAudio)
 }
 tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyGameAudio) }
