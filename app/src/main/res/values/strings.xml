@@ -1,0 +1,127 @@
+<resources>
+    <string name="app_name">حاسبة Okey</string>
+    <string name="timer_style_title">شكل وتصميم المؤقّت</string>
+    <string name="timer_size_title">حجم خط أرقام المؤقّت</string>
+    <string name="timer_style_ring">حلقة ملكية</string>
+    <string name="timer_style_tile">حجر أوكي متوهج</string>
+    <string name="timer_style_speedometer">عداد سرعة</string>
+    <string name="timer_style_bar">شريط تدفق مزدوج</string>
+    <string name="timer_style_wheel">قرص الأحجار</string>
+    <string name="timer_style_neon">شاشة نيون</string>
+    <string name="timer_style_capsule">كبسولة الملعب</string>
+    <string name="timer_style_wave">شريط متموج</string>
+    <string name="timer_size_normal">عادي</string>
+    <string name="timer_size_large">كبير</string>
+    <string name="timer_size_extra">ضخم جداً</string>
+    <string name="timer_size_huge">عملاق للطاولة</string>
+    <string name="timer_fullscreen">وضع ملء الشاشة الأفقي</string>
+    <string name="tab_timer">المؤقّت</string>
+    <string name="tab_scoreboard">النقاط</string>
+    <string name="tab_history">السجل</string>
+    <string name="tab_settings">الإعدادات</string>
+    
+    <!-- Timer -->
+    <string name="timer_title">مؤقّت الدور</string>
+    <string name="timer_start">ابدأ الدور</string>
+    <string name="timer_pause">إيقاف مؤقت</string>
+    <string name="timer_resume">استئناف</string>
+    <string name="timer_reset">إعادة ضبط</string>
+    <string name="timer_next">اللاعب التالي</string>
+    <string name="timer_time_up">انتهى الوقت! اسحب ثلاث يا غشيم</string>
+    <string name="timer_penalty_phrase">اسحب ثلاث يا غشيم!</string>
+    <string name="timer_active_player">الدور عند: %1$s</string>
+    <string name="timer_change_color">تغيير لون اللاعب</string>
+    <string name="timer_seconds">%1$d ثانية</string>
+    <string name="timer_custom">تخصيص الوقت</string>
+    <string name="timer_preset_15">15 ث</string>
+    <string name="timer_preset_30">30 ث</string>
+    <string name="timer_preset_45">45 ث</string>
+    <string name="timer_preset_60">60 ث</string>
+    <string name="timer_tap_hint">المس أي مكان للانتقال للدور التالي</string>
+    <string name="tick_sound_settings">إعدادات صوت التكتكة</string>
+    <string name="tick_mode_title">نمط صوت التكتكة</string>
+    <string name="tick_mode_escalating">تصاعدي (يرتفع ويسرع عند 10 و5 ثوانٍ)</string>
+    <string name="tick_mode_fixed">ثابت (مستوى موحد)</string>
+    <string name="tick_tone_title">نوع نغمة التكة</string>
+    <string name="tick_tone_wood">خشب أوكي 🀄</string>
+    <string name="tick_tone_digital">رقمية إلكترونية ⚡</string>
+    <string name="tick_tone_click">نقرة ميكانيكية ⏱️</string>
+    <string name="tick_tone_classic">كلاسيكية 🔔</string>
+    <string name="voice_announcements">التنبيهات الصوتية (لهجة سعودية)</string>
+    <string name="voice_announce_player">نطق اسم اللاعب عند حلول دوره</string>
+    <string name="voice_time_up_penalty">نطق «اسحب ثلاث يا غشيم» عند انتهاء الوقت</string>
+    <string name="player_colors_title">ألوان اللاعبين المفضلة</string>
+    <string name="player_colors_subtitle">اختر اللون المفضل لكل لاعب (ينعكس فوراً على لون المؤقّت في دوره)</string>
+    
+    <!-- Scoreboard Setup -->
+    <string name="score_setup_title">إعداد لعبة جديدة</string>
+    <string name="players_count">عدد اللاعبين</string>
+    <string name="player_names">أسماء اللاعبين</string>
+    <string name="player_default_name">لاعب %1$d</string>
+    <string name="scoring_rule">نظام الفوز</string>
+    <string name="scoring_lowest_wins">الأقل نقاطاً هو الفائز (حساب العقوبات)</string>
+    <string name="scoring_highest_wins">الأعلى نقاطاً هو الفائز (تجميع النقاط)</string>
+    <string name="start_game">بدء اللعبة</string>
+    
+    <!-- Scoreboard Live -->
+    <string name="scoreboard_title">لوحة النقاط</string>
+    <string name="round_number">الجولة %1$d</string>
+    <string name="total_score">المجموع التراكمي</string>
+    <string name="new_round">تسجيل جولة جديدة</string>
+    <string name="end_game">إنهاء اللعبة</string>
+    <string name="undo">تراجع</string>
+    <string name="edit_round">تعديل الجولة</string>
+    <string name="delete_round">حذف الجولة</string>
+    <string name="leader_badge">المتصدّر</string>
+    <string name="save_round">حفظ نقاط الجولة</string>
+    <string name="enter_score_for">نقاط %1$s:</string>
+    
+    <!-- Final Result -->
+    <string name="game_over_title">النتيجة النهائية</string>
+    <string name="winner_announcement">مبروك الفوز!</string>
+    <string name="winner_title">الفائز بالمركز الأول 🏆</string>
+    <string name="podium_first">الأول 🥇</string>
+    <string name="podium_second">الثاني 🥈</string>
+    <string name="podium_third">الثالث 🥉</string>
+    <string name="new_game_same_players">لعبة جديدة بنفس اللاعبين</string>
+    <string name="new_game_fresh">لعبة جديدة</string>
+    <string name="share_result">مشاركة النتيجة</string>
+    
+    <!-- History -->
+    <string name="history_title">سجل الألعاب السابقة</string>
+    <string name="no_history">لا توجد ألعاب مسجلة حتى الآن</string>
+    <string name="history_players">%1$d لاعبين</string>
+    <string name="history_rounds">%1$d جولات</string>
+    <string name="clear_history">مسح السجل</string>
+    <string name="stats_title">إحصائيات اللاعبين</string>
+    
+    <!-- Settings -->
+    <string name="settings_title">الإعدادات</string>
+    <string name="sound_effects">المؤثرات الصوتية</string>
+    <string name="sound_tick">صوت التكة مع كل ثانية</string>
+    <string name="sound_warning">تنبيه آخر 5 ثوانٍ</string>
+    <string name="haptic_feedback">الاهتزاز والتغذية الراجعة</string>
+    <string name="keep_screen_on">إبقاء الشاشة مضاءة أثناء اللعب</string>
+    <string name="tap_to_advance">اللمس على الشاشة للتقديم للدور التالي</string>
+    <string name="default_timer_duration">مدة الدور الافتراضية</string>
+    <string name="theme_selection">المظهر (الثيم)</string>
+    
+    <!-- Audio System Overhaul -->
+    <string name="voice_gender_title">نوع الصوت البشري</string>
+    <string name="voice_gender_male">صوت رجالي 👨</string>
+    <string name="voice_gender_female">صوت نسائي 👩</string>
+    <string name="voice_dialect_title">اللهجة المحلية</string>
+    <string name="voice_dialect_najdi">نجدية 🇸🇦</string>
+    <string name="voice_dialect_hijazi">حجازية 🌴</string>
+    <string name="voice_countdown_title">العد التنازلي الصوتي للأرقام (5-1)</string>
+    <string name="voice_countdown_desc">نطق الأرقام «خمسة، أربعة، ثلاثة، اثنين، واحد» بصوت بشري طبيعي</string>
+    <string name="master_volume_title">مستوى الصوت العام</string>
+    <string name="mute_all_title">كتم الكل (صامت)</string>
+    <string name="mute_all_desc">كتم فوري لكافة الأصوات والتنبيهات</string>
+    <string name="audio_test_button">تجربة منظومة الصوت (10 ثوانٍ) 🔊</string>
+    <string name="audio_test_desc">محاكاة عملية لدور كامل يوضح نطق الاسم، والتصاعد التدريجي، وتسارع الإيقاع، وجملة الجزاء</string>
+    <string name="edit_pronunciation">تعديل نطق الاسم</string>
+    <string name="pronunciation_dialog_title">تعديل نطق اسم اللاعب</string>
+    <string name="pronunciation_dialog_hint">اكتب الاسم بالتشكيل الصوتي (مثال: عَبْدَالعَزِيز، بوفَهَد، سَلْمَان)</string>
+    <string name="test_pronunciation_button">استمع للنطق 🎧</string>
+</resources>
