@@ -12,19 +12,18 @@ from generate_game_audio import describe, DEFAULT_VOICE_ID  # noqa: E402
 
 OUT = Path("samples")
 API = "https://api.elevenlabs.io/v1"
-NAME = "خالد"
+NAMES = ["حسين", "مسلم", "عماد"]
 
+# Variations on the two approved ideas: Gulf zaffa drums, and stadium drums.
 SOUND_EFFECTS = {
-    "beat_zaffa": "Gulf Arabic zaffa victory celebration, heavy tabl drums and darbuka, fast rhythmic handclaps, "
-                  "joyful ululation and crowd cheering, festive and loud, no vocals",
-    "beat_stadium": "Stadium victory hype, massive war drums, stomp stomp clap rhythm, crowd chanting hey, "
-                    "brass stabs, energetic champion moment",
-}
-SONGS = {
-    "song_khaleeji": f"Energetic Khaleeji celebration song, heavy tabl and darbuka drums, handclaps, a joyful male "
-                     f"singer sings in Gulf Arabic: 'مبروك يا {NAME}، يا بطل الأوكي'. Festive wedding zaffa energy.",
-    "song_stadium": f"Upbeat stadium victory anthem, big drums and crowd, a male singer and crowd chant in Arabic: "
-                    f"'{NAME} بطل! {NAME} بطل!', triumphant and hype.",
+    "beat_zaffa_fast": "Fast Gulf Arabic zaffa wedding procession, very heavy tabl drums and tambourines, darbuka rolls, "
+                       "rhythmic group handclaps, loud joyful ululation, festive and energetic, no vocals",
+    "beat_zaffa_big": "Big Khaleeji celebration drum ensemble, deep tabl hits, mirwas drums, fast clapping, "
+                      "crowd cheering and whistling, triumphant, no vocals",
+    "beat_stadium_war": "Huge stadium war drums, thunderous taiko hits, stomp stomp clap, crowd roaring, "
+                        "air horn, champion celebration, very energetic",
+    "beat_stadium_brass": "Stadium victory anthem, marching drumline, brass fanfare stabs, crowd chanting hey hey, "
+                          "confetti moment, epic and hype",
 }
 
 
@@ -47,11 +46,10 @@ def main():
     jobs = []
     for name, prompt in SOUND_EFFECTS.items():
         jobs.append((name, "/sound-generation", {"text": prompt, "duration_seconds": 15, "prompt_influence": 0.5}))
-    for name, prompt in SONGS.items():
-        jobs.append((name, "/music", {"prompt": prompt, "music_length_ms": 20000, "model_id": "music_v1"}))
-    jobs.append(("voice_announcer", f"/text-to-speech/{DEFAULT_VOICE_ID}", {
-        "text": f"مبرووووك الفوز يا {NAME}!", "model_id": "eleven_multilingual_v2",
-        "voice_settings": {"stability": 0.25, "similarity_boost": 0.8, "style": 0.7, "use_speaker_boost": True}}))
+    for index, player in enumerate(NAMES, 1):
+        jobs.append((f"voice_announcer_{index}", f"/text-to-speech/{DEFAULT_VOICE_ID}", {
+            "text": f"مبرووووك الفوز يا {player}!", "model_id": "eleven_multilingual_v2",
+            "voice_settings": {"stability": 0.25, "similarity_boost": 0.8, "style": 0.7, "use_speaker_boost": True}}))
     for name, path, payload in jobs:
         try:
             (OUT / f"{name}.mp3").write_bytes(post(path, payload, key))
