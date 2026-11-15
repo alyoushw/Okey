@@ -138,6 +138,17 @@ def bundle_player_names(key, voice_id):
     return 0
 
 
+def describe(error):
+    """Provider status and message only; the request (and its key) is never printed."""
+    if isinstance(error, urllib.error.HTTPError):
+        try:
+            detail = error.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            detail = ""
+        return f"HTTP {error.code}: {detail}"
+    return f"{type(error).__name__}: {error}"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true", help="Check the pack without generating or charging credits")
@@ -151,8 +162,8 @@ def main():
             return 1
         try:
             return bundle_player_names(key, os.environ.get("ELEVENLABS_VOICE_ID", DEFAULT_VOICE_ID))
-        except (urllib.error.URLError, ValueError):
-            print("Could not read the voice history; continuing without bundled names.", file=sys.stderr)
+        except (urllib.error.URLError, ValueError) as error:
+            print(f"Could not read the voice history ({describe(error)}); continuing without bundled names.", file=sys.stderr)
             return 0
     manifest = json.loads((AUDIO / "manifest.json").read_text())
     missing = [name for name in manifest if not (AUDIO / f"{name}.mp3").is_file() or (AUDIO / f"{name}.mp3").stat().st_size == 0]
@@ -173,8 +184,8 @@ def main():
     for name in missing:
         try:
             audio = generate(manifest[name], key, voice, allow_generate=not args.history_only)
-        except (urllib.error.URLError, ValueError):
-            print(f"Could not generate {name}; check history permission, voice access and provider credits.", file=sys.stderr)
+        except (urllib.error.URLError, ValueError) as error:
+            print(f"Could not generate {name} ({describe(error)}); check history permission, voice access and provider credits.", file=sys.stderr)
             return 1
         temporary = AUDIO / f"{name}.tmp"
         temporary.write_bytes(audio)
