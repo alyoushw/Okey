@@ -1,0 +1,26 @@
+name: Victory sound samples
+# Makes listening samples only; they go to the music-samples release, never into the app.
+on:
+  push:
+    paths:
+      - 'scripts/make_music_samples.py'
+      - '.github/workflows/music-samples.yml'
+permissions:
+  contents: write
+jobs:
+  samples:
+    if: startsWith(github.ref_name, 'ccr-') || startsWith(github.ref_name, 'claude/') || github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate samples
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        run: python3 scripts/make_music_samples.py
+      - name: Upload samples
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls samples/*.mp3 > /dev/null 2>&1 || { echo "No samples were made"; exit 0; }
+          gh release view music-samples > /dev/null 2>&1 || gh release create music-samples --target "$GITHUB_SHA" --prerelease --latest=false --title "Victory sound samples" --notes "Listening samples only, not part of the app."
+          gh release upload music-samples samples/*.mp3 --clobber

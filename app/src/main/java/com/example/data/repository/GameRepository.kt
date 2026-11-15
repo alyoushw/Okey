@@ -134,7 +134,7 @@ data class SettingsState(
     val voiceCountdownEnabled: Boolean = true,
     val masterVolume: Float = 1.0f,
     val muteAll: Boolean = false,
-    val victoryMusic: String = "drums_heroes" // id in assets/victory_music, "short_tune" or "none"
+    val victoryMusic: String = "beat_zaffa" // id in assets/victory_music, "short_tune" or "none"
 )
 
 object SettingsRepository {
@@ -177,7 +177,7 @@ object SettingsRepository {
             voiceCountdownEnabled = p.getBoolean("voice_countdown_enabled", true),
             masterVolume = p.getFloat("master_volume", 1.0f),
             muteAll = p.getBoolean("mute_all", false),
-            victoryMusic = p.getString("victory_music", "drums_heroes") ?: "drums_heroes"
+            victoryMusic = p.getString("victory_music", "beat_zaffa") ?: "beat_zaffa"
         )
     }
 
