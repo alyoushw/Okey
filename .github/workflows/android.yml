@@ -1,0 +1,92 @@
+name: Android checks
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install Android platform
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36.1" "build-tools;36.0.0"'
+      - name: Test voice service without calling ElevenLabs
+        run: python3 -m unittest discover -s voice_service -v
+      - name: Restore existing game voices or generate missing clips
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ECc3xM44reI7J5jdm8jB
+        run: |
+          if [ -n "$ELEVENLABS_API_KEY" ]; then
+            # A voice problem must not block the APK: report it and keep building.
+            python3 scripts/generate_game_audio.py || echo "::warning::Fixed game voices could not be prepared"
+            python3 scripts/generate_game_audio.py --player-names || echo "::warning::Player names could not be bundled"
+          else
+            echo "Voice key is not configured; building an interface preview."
+          fi
+      # Victory music is generated once and kept in the music-pack release, so later builds reuse it for free.
+      - name: Restore or prepare victory music
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        run: |
+          folder=app/src/main/assets/victory_music
+          mkdir -p "$folder"
+          gh release download music-pack -p '*.mp3' -D "$folder" --clobber 2>/dev/null || echo "No saved music yet"
+          before=$(ls "$folder" | sort)
+          python3 scripts/generate_victory_music.py || echo "::warning::Some victory music could not be prepared"
+          new=$(comm -13 <(echo "$before") <(ls "$folder" | sort))
+          if [ -n "$new" ]; then
+            gh release view music-pack > /dev/null 2>&1 || gh release create music-pack --target "$GITHUB_SHA" --prerelease --latest=false --title "Okey music pack" --notes "Saved victory music, reused by every build."
+            for file in $new; do gh release upload music-pack "$folder/$file" --clobber; done
+          fi
+      # The preview APK carries the key so that brand-new player names can be generated on the
+      # phone. Earlier names come from the bundled history clips and the account history first.
+      # Share this APK only with people you trust; anyone holding it can extract the key.
+      - name: Build and check Android preview
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --stacktrace
+      # Direct download link that always points at the newest successful build:
+      # https://github.com/alyoushw/Okey/releases/download/preview-latest/Okey.apk
+      # Only the trusted branches may replace what users download and get as an update.
+      - name: Publish direct download link
+        if: github.event_name != 'pull_request' && (github.ref_name == 'main' || github.ref_name == 'ccr-38d80529-ie3z1v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Okey.apk
+          notes="آخر نسخة تجريبية — الفرع ${GITHUB_REF_NAME} — ${GITHUB_SHA::7}"
+          # The app reads version.json to offer the update; the first commit line is shown as its notes.
+          python3 -c 'import json,os,sys; json.dump({"versionCode": 100 + int(os.environ["GITHUB_RUN_NUMBER"]), "versionName": "1.2." + os.environ["GITHUB_RUN_NUMBER"], "notes": sys.argv[1]}, open("version.json", "w"), ensure_ascii=False)' "$(git log -1 --format="%(trailers:key=Notes-ar,valueonly)" | head -1)"
+          if gh release view preview-latest > /dev/null 2>&1; then
+            gh release upload preview-latest Okey.apk --clobber
+            gh release upload preview-latest version.json --clobber
+            gh release edit preview-latest --notes "$notes"
+          else
+            gh release create preview-latest Okey.apk version.json --target "$GITHUB_SHA" --prerelease --latest=false --title "حاسبة Okey — آخر نسخة" --notes "$notes"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: okey-preview
+          path: app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: game-voice-pack
+          path: app/src/main/assets/game_audio/*.mp3
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-check-reports
+          path: app/build/reports/

@@ -144,38 +144,36 @@ class AudioRecorderHelper(private val context: Context) {
     ) {
         stopPlayback()
         val file = File(filePath)
-        if (!file.exists()) {
+        if (!file.exists() || volume <= 0f) {
             onFinished()
             return
         }
-
+        val player = MediaPlayer()
+        var finished = false
+        fun complete() {
+            if (finished) return
+            finished = true
+            try { player.release() } catch (_: Exception) {}
+            if (mediaPlayer === player) mediaPlayer = null
+            onFinished()
+        }
         try {
-            val player = MediaPlayer().apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .build()
-                )
-                setDataSource(file.absolutePath)
-                val effVol = volume.coerceIn(0.0f, 1.0f)
-                setVolume(effVol, effVol)
-                setOnCompletionListener { mp ->
-                    try {
-                        mp.release()
-                    } catch (_: Exception) {}
-                    if (mediaPlayer == mp) {
-                        mediaPlayer = null
-                    }
-                    onFinished()
-                }
-                prepare()
-                start()
+            player.setAudioAttributes(AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .setUsage(AudioAttributes.USAGE_MEDIA).build())
+            player.setDataSource(file.absolutePath)
+            val level = volume.coerceIn(0f, 1f)
+            player.setVolume(level, level)
+            player.setOnCompletionListener { complete() }
+            player.setOnErrorListener { _, _, _ -> complete(); true }
+            player.setOnPreparedListener {
+                if (mediaPlayer === player) player.start()
             }
             mediaPlayer = player
-        } catch (e: Exception) {
-            Log.e("AudioRecorderHelper", "Failed to play recorded file: $filePath", e)
-            onFinished()
+            player.prepareAsync()
+        } catch (error: Exception) {
+            Log.e("AudioRecorderHelper", "Audio playback failed", error)
+            complete()
         }
     }
 

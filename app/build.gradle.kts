@@ -1,12 +1,16 @@
-import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
-  alias(libs.plugins.secrets)
-  alias(libs.plugins.google.services)
 }
+
+val voiceProperties = Properties().apply {
+  rootProject.file(".env").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+fun voiceSetting(name: String): String = System.getenv(name) ?: voiceProperties.getProperty(name, "")
+fun quoted(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
   namespace = "com.example"
@@ -16,8 +20,11 @@ android {
     applicationId = "com.aistudio.okeycompanion.vjkrp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    // Every CI build gets a higher number, so the in-app updater can tell a newer build apart.
+    val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
+    versionCode = 100 + buildNumber
+    versionName = "1.2.$buildNumber"
+    buildConfigField("String", "VOICE_SERVICE_URL", quoted(voiceSetting("VOICE_SERVICE_URL")))
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -25,6 +32,13 @@ android {
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
   // and updating Android apps in AI Studio.
   signingConfigs {
+    // One fixed key for preview builds, so each new APK installs over the previous one.
+    create("preview") {
+      storeFile = rootProject.file("signing/okey-preview.keystore")
+      storePassword = "android"
+      keyAlias = "okeypreview"
+      keyPassword = "android"
+    }
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
@@ -32,16 +46,12 @@ android {
       keyAlias = "upload"
       keyPassword = System.getenv("KEY_PASSWORD")
     }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
-    }
+
   }
 
   buildTypes {
     release {
+      buildConfigField("String", "ELEVENLABS_API_KEY", quoted(""))
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -50,9 +60,8 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
-      // AI Studio.
-      signingConfig = signingConfigs.getByName("debugConfig")
+      buildConfigField("String", "ELEVENLABS_API_KEY", quoted(voiceSetting("ELEVENLABS_API_KEY")))
+      signingConfig = signingConfigs.getByName("preview")
     }
   }
   compileOptions {
@@ -70,27 +79,10 @@ android {
   }
 }
 
-// Configure the Secrets Gradle Plugin to use .env and .env.example files
-// to match the convention used in Web projects.
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
-  ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
-}
 
-googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
-
-// Some unused dependencies are commented out below instead of being removed.
-// This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
-  implementation(platform(libs.firebase.bom))
-  // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
-  // implementation(libs.androidx.camera.camera2)
-  // implementation(libs.androidx.camera.core)
-  // implementation(libs.androidx.camera.lifecycle)
-  // implementation(libs.androidx.camera.view)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)
@@ -98,34 +90,15 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
-  // implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
-  // implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
-  // implementation(libs.coil.compose)
-  implementation(libs.converter.moshi)
-  implementation(libs.firebase.ai)
-  // Uncomment to use Firestore:
-  // implementation(libs.firebase.firestore)
 
-  // Uncomment ALL FOUR of the following dependencies together to use Firebase Auth and Google
-  // Sign-In via Credential Manager:
-  // implementation(libs.firebase.auth)
-  // implementation(libs.androidx.credentials)
-  // implementation(libs.androidx.credentials.play.services)
-  // implementation(libs.googleid)
-  implementation(libs.firebase.appcheck.recaptcha)
-  implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
-  implementation(libs.logging.interceptor)
-  implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
-  // implementation(libs.play.services.location)
-  implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
@@ -140,5 +113,24 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
 }
+
+// A public release must include the complete offline game voice pack.
+val bundledGameAudio = listOf("turn_start", "warning_10s", "countdown_5", "countdown_4", "countdown_3", "countdown_2", "countdown_1", "time_up", "victory")
+  .map { layout.projectDirectory.file("src/main/assets/game_audio/$it.mp3").asFile }
+@org.gradle.work.DisableCachingByDefault(because = "Validates release inputs without producing outputs")
+abstract class VerifyGameAudio : DefaultTask() {
+  @get:InputFiles
+  @get:PathSensitive(PathSensitivity.RELATIVE)
+  abstract val audioFiles: ConfigurableFileCollection
+
+  @TaskAction
+  fun verify() {
+    val missing = audioFiles.files.filter { !it.isFile || it.length() == 0L }.map { it.name }
+    check(missing.isEmpty()) { "Missing bundled game audio: ${missing.joinToString()}. Run scripts/generate_game_audio.py before release." }
+  }
+}
+val verifyGameAudio by tasks.registering(VerifyGameAudio::class) {
+  audioFiles.from(bundledGameAudio)
+}
+tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyGameAudio) }

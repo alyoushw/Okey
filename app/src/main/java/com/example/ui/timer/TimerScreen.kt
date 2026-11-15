@@ -100,11 +100,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material.icons.filled.RecordVoiceOver
 import com.example.R
 import com.example.data.model.Player
 import com.example.ui.components.PlayerAvatarBadge
-import com.example.ui.components.PronunciationDialog
 import com.example.ui.theme.OkeyPlayerPalette
 import com.example.ui.theme.OkeyTileBone
 import com.example.ui.theme.OkeyTileBorder
@@ -122,7 +120,6 @@ fun TimerScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     var showCustomDialog by remember { mutableStateOf(false) }
-    var showPronunciationDialog by remember { mutableStateOf(false) }
 
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -204,7 +201,6 @@ fun TimerScreen(
             onSelectPlayer = { viewModel.selectPlayer(it) },
             onSetDuration = { viewModel.setDuration(it) },
             onOpenCustomDialog = { showCustomDialog = true },
-            onEditPronunciation = { showPronunciationDialog = true },
             onClearTurnNotice = { viewModel.clearTurnNoticeMessage() },
             onScreenTapped = { viewModel.onScreenTapped() },
             modifier = modifier
@@ -222,19 +218,7 @@ fun TimerScreen(
         )
     }
 
-    if (showPronunciationDialog) {
-        PronunciationDialog(
-            player = uiState.activePlayer,
-            onDismiss = { showPronunciationDialog = false },
-            onSave = { newPhonetic ->
-                viewModel.updatePlayerPhoneticName(uiState.activePlayer.id, newPhonetic)
-                showPronunciationDialog = false
-            },
-            onTest = { name, phonetic ->
-                viewModel.testPronunciation(name, phonetic)
-            }
-        )
-    }
+
 }
 
 @Composable
@@ -249,7 +233,6 @@ fun PortraitTimerLayout(
     onSelectPlayer: (Int) -> Unit,
     onSetDuration: (Int) -> Unit,
     onOpenCustomDialog: () -> Unit,
-    onEditPronunciation: () -> Unit = {},
     onClearTurnNotice: () -> Unit = {},
     onScreenTapped: () -> Unit,
     modifier: Modifier = Modifier
@@ -278,8 +261,7 @@ fun PortraitTimerLayout(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 ActivePlayerCard(
                     activePlayer = uiState.activePlayer,
-                    onOpenCustomDialog = onOpenCustomDialog,
-                    onEditPronunciation = onEditPronunciation
+                    onOpenCustomDialog = onOpenCustomDialog
                 )
 
                 if (uiState.turnPreparationMessage != null) {
@@ -767,7 +749,6 @@ fun LandscapeTimerLayout(
 fun ActivePlayerCard(
     activePlayer: Player,
     onOpenCustomDialog: () -> Unit,
-    onEditPronunciation: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -813,32 +794,11 @@ fun ActivePlayerCard(
                         fontSize = 18.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    if (activePlayer.phoneticName.isNotBlank()) {
-                        Text(
-                            text = "نطق: ${activePlayer.phoneticName}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 11.5.sp
-                        )
-                    }
+
                 }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    onClick = onEditPronunciation,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .testTag("timer_active_player_pronounce_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.RecordVoiceOver,
-                        contentDescription = stringResource(R.string.edit_pronunciation),
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(4.dp))
                 FilledTonalButton(
                     onClick = onOpenCustomDialog,
                     shape = RoundedCornerShape(12.dp),

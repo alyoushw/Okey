@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import androidx.room.withTransaction
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -43,8 +44,14 @@ object GameSessionManager {
     private val _preGenState = MutableStateFlow(PreGenState())
     val preGenState: StateFlow<PreGenState> = _preGenState.asStateFlow()
 
+    private val _sessionVersion = MutableStateFlow(0L)
+    val sessionVersion: StateFlow<Long> = _sessionVersion.asStateFlow()
+
+    fun stopCurrentTurn() { _sessionVersion.value += 1 }
+
     fun setPlayers(newPlayers: List<Player>, resetTurnToFirst: Boolean = false) {
         _players.value = newPlayers
+        if (resetTurnToFirst) stopCurrentTurn()
         if (resetTurnToFirst || _activePlayerIndex.value !in newPlayers.indices) {
             _activePlayerIndex.value = 0
         }
@@ -126,7 +133,8 @@ data class SettingsState(
     val voiceDialect: String = "NAJDI", // NAJDI, HIJAZI
     val voiceCountdownEnabled: Boolean = true,
     val masterVolume: Float = 1.0f,
-    val muteAll: Boolean = false
+    val muteAll: Boolean = false,
+    val victoryMusic: String = "drums_heroes" // id in assets/victory_music, "short_tune" or "none"
 )
 
 object SettingsRepository {
@@ -168,7 +176,8 @@ object SettingsRepository {
             voiceDialect = p.getString("voice_dialect", "NAJDI") ?: "NAJDI",
             voiceCountdownEnabled = p.getBoolean("voice_countdown_enabled", true),
             masterVolume = p.getFloat("master_volume", 1.0f),
-            muteAll = p.getBoolean("mute_all", false)
+            muteAll = p.getBoolean("mute_all", false),
+            victoryMusic = p.getString("victory_music", "drums_heroes") ?: "drums_heroes"
         )
     }
 
@@ -207,6 +216,7 @@ object SettingsRepository {
             ?.putBoolean("voice_countdown_enabled", settings.voiceCountdownEnabled)
             ?.putFloat("master_volume", settings.masterVolume)
             ?.putBoolean("mute_all", settings.muteAll)
+            ?.putString("victory_music", settings.victoryMusic)
             ?.commit() // Synchronous persistence guarantee
     }
 
@@ -299,38 +309,36 @@ class GameRepository(val context: Context) {
     }
 
     suspend fun saveActiveGame(state: ActiveGameState) = withContext(Dispatchers.IO) {
-        try {
-            val root = JSONObject()
-            root.put("rule", state.scoringRule.name)
-            root.put("finished", state.isFinished)
+        val root = JSONObject()
+        root.put("rule", state.scoringRule.name)
+        root.put("finished", state.isFinished)
 
-            val playersArr = JSONArray()
-            for (p in state.players) {
-                val pObj = JSONObject()
-                pObj.put("id", p.id)
-                pObj.put("name", p.name)
-                pObj.put("color", p.colorHex)
-                pObj.put("score", p.totalScore)
-                pObj.put("phonetic", p.phoneticName)
-                playersArr.put(pObj)
+        val playersArr = JSONArray()
+        for (p in state.players) {
+            val pObj = JSONObject()
+            pObj.put("id", p.id)
+            pObj.put("name", p.name)
+            pObj.put("color", p.colorHex)
+            pObj.put("score", p.totalScore)
+            pObj.put("phonetic", p.phoneticName)
+            playersArr.put(pObj)
+        }
+        root.put("players", playersArr)
+
+        val roundsArr = JSONArray()
+        for (r in state.rounds) {
+            val rObj = JSONObject()
+            rObj.put("roundNumber", r.roundNumber)
+            val scoresObj = JSONObject()
+            for ((pid, score) in r.scores) {
+                scoresObj.put(pid.toString(), score)
             }
-            root.put("players", playersArr)
+            rObj.put("scores", scoresObj)
+            roundsArr.put(rObj)
+        }
+        root.put("rounds", roundsArr)
 
-            val roundsArr = JSONArray()
-            for (r in state.rounds) {
-                val rObj = JSONObject()
-                rObj.put("roundNumber", r.roundNumber)
-                val scoresObj = JSONObject()
-                for ((pid, score) in r.scores) {
-                    scoresObj.put(pid.toString(), score)
-                }
-                rObj.put("scores", scoresObj)
-                roundsArr.put(rObj)
-            }
-            root.put("rounds", roundsArr)
-
-            gameDao.saveActiveGame(ActiveGameEntity(1, root.toString()))
-        } catch (_: Exception) {}
+        gameDao.saveActiveGame(ActiveGameEntity(1, root.toString()))
     }
 
     suspend fun loadActiveGame(): ActiveGameState? = withContext(Dispatchers.IO) {
@@ -407,8 +415,10 @@ class GameRepository(val context: Context) {
             winnerScore = winnerScore,
             resultsJson = resultsArr.toString()
         )
-        gameDao.insertRecord(record)
-        gameDao.clearActiveGame()
+        database.withTransaction {
+            gameDao.insertRecord(record)
+            gameDao.clearActiveGame()
+        }
     }
 
     suspend fun deleteRecord(id: Long) = withContext(Dispatchers.IO) {
@@ -458,6 +468,8 @@ class GameRepository(val context: Context) {
             )
         )
 
+        list.add(CustomSoundSlot(id = "warning_10s", title = "آخر عشر ثوانٍ", description = "", category = SoundSlotCategory.WARNING_10S, customText = "باقي عشر ثواني"))
+        list.add(CustomSoundSlot(id = "victory", title = "الفوز", description = "", category = SoundSlotCategory.WIN_VICTORY, customText = "مبروك الفوز"))
         // 2. Countdown 5..1
         list.add(CustomSoundSlot(id = "countdown_5", title = "العد التنازلي: 5", description = "نطق الثانية الخامسة", category = SoundSlotCategory.COUNTDOWN_5, customText = "خَمْسَة"))
         list.add(CustomSoundSlot(id = "countdown_4", title = "العد التنازلي: 4", description = "نطق الثانية الرابعة", category = SoundSlotCategory.COUNTDOWN_4, customText = "أَرْبَعَة"))
@@ -472,7 +484,7 @@ class GameRepository(val context: Context) {
                 title = "عبارة انتهاء الوقت",
                 description = "الجملة الفاصلة التي تُنطق في لحظة الصفر عند انتهاء وقت الدور",
                 category = SoundSlotCategory.TIME_UP,
-                customText = "اِسْحَبْ ثَلَاثْ يَا غَشِيم!"
+                customText = "اسحب ثلاث يا غشيم"
             )
         )
 

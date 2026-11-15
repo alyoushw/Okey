@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -48,6 +49,14 @@ class ElevenLabsService(private val context: Context) {
         }
 
     companion object {
+        @Volatile private var bundledIndex: Map<String, String>? = null
+
+        /** Same rule as scripts/generate_game_audio.py: NFKC and collapsed whitespace. */
+        fun normaliseText(text: String): String =
+            java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFKC)
+                .trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+
+        private val generationLock = kotlinx.coroutines.sync.Mutex()
         private val _logs = MutableStateFlow<List<GenerationLogEntry>>(emptyList())
         val logs: StateFlow<List<GenerationLogEntry>> = _logs.asStateFlow()
 
@@ -91,6 +100,7 @@ class ElevenLabsService(private val context: Context) {
     }
 
     fun hasValidApiKey(): Boolean {
+        if (BuildConfig.VOICE_SERVICE_URL.startsWith("https://")) return true
         val key = getApiKey().trim()
         return key.isNotEmpty() && key != "null" && !key.contains("MY_")
     }
@@ -109,7 +119,80 @@ class ElevenLabsService(private val context: Context) {
     fun getCachedFile(text: String, settings: ElevenLabsSettings): File? {
         val key = computeCacheKey(text, settings)
         val file = File(cacheDir, "el_$key.mp3")
-        return if (file.exists() && file.length() > 0) file else null
+        if (file.exists() && file.length() > 0) return file
+        return copyBundledHistoryClip(text, file)
+    }
+
+    /** Names recorded earlier in the ElevenLabs history ship inside the app (assets/voice_history). */
+    private fun copyBundledHistoryClip(text: String, target: File): File? {
+        val index = bundledHistoryIndex()
+        val asset = bundledPhrasings(normaliseText(text)).firstNotNullOfOrNull { index[it] } ?: return null
+        return try {
+            val temporary = File.createTempFile("bundled_", ".tmp", cacheDir)
+            try {
+                context.assets.open("voice_history/$asset").use { input ->
+                    temporary.outputStream().use { input.copyTo(it) }
+                }
+                if (temporary.length() == 0L || !temporary.renameTo(target)) return null
+            } finally { temporary.delete() }
+            target
+        } catch (_: java.io.IOException) { null }
+    }
+
+    /** The exact phrase first, then older wordings of the same player's turn saved in the history. */
+    private fun bundledPhrasings(phrase: String): List<String> {
+        val name = Regex("^يلا يا (.+)، دورك$").find(phrase)?.groupValues?.get(1) ?: return listOf(phrase)
+        return listOf(phrase, "$name، جاء دورك", "يلا $name دورك")
+    }
+
+    private fun bundledHistoryIndex(): Map<String, String> {
+        bundledIndex?.let { return it }
+        val parsed = try {
+            val json = JSONObject(context.assets.open("voice_history/index.json").bufferedReader().use { it.readText() })
+            json.keys().asSequence().associate { normaliseText(it) to json.getString(it) }
+        } catch (_: Exception) { emptyMap() }
+        bundledIndex = parsed
+        return parsed
+    }
+
+    /**
+     * Looks for an earlier recording of exactly this text and voice in the account history,
+     * so a name that was generated before is downloaded instead of being paid for again.
+     */
+    private fun downloadFromHistory(text: String, apiKey: String, voiceId: String): ByteArray? {
+        val wanted = normaliseText(text)
+        var cursor: String? = null
+        repeat(20) {
+            val url = StringBuilder("https://api.elevenlabs.io/v1/history?page_size=100")
+                .append("&voice_id=").append(java.net.URLEncoder.encode(voiceId, "UTF-8"))
+                .append("&search=").append(java.net.URLEncoder.encode(text.trim(), "UTF-8"))
+            cursor?.let { url.append("&start_after_history_item_id=").append(java.net.URLEncoder.encode(it, "UTF-8")) }
+            val page = client.newCall(Request.Builder().url(url.toString()).addHeader("xi-api-key", apiKey).get().build())
+                .execute().use { response ->
+                    if (!response.isSuccessful) return null
+                    JSONObject(response.body?.string() ?: return null)
+                }
+            val items = page.optJSONArray("history") ?: return null
+            for (i in 0 until items.length()) {
+                val item = items.getJSONObject(i)
+                val source = item.optString("source", "TTS")
+                if (item.optString("voice_id") == voiceId && normaliseText(item.optString("text")) == wanted &&
+                    (source.isEmpty() || source == "TTS")
+                ) {
+                    val id = item.optString("history_item_id").ifEmpty { return null }
+                    val audioRequest = Request.Builder()
+                        .url("https://api.elevenlabs.io/v1/history/${java.net.URLEncoder.encode(id, "UTF-8")}/audio")
+                        .addHeader("xi-api-key", apiKey).get().build()
+                    return client.newCall(audioRequest).execute().use { audio ->
+                        if (audio.isSuccessful) audio.body?.bytes()?.takeIf { it.isNotEmpty() } else null
+                    }
+                }
+            }
+            val next = page.optString("last_history_item_id")
+            if (!page.optBoolean("has_more", false) || next.isEmpty() || next == cursor) return null
+            cursor = next
+        }
+        return null
     }
 
     fun isCached(text: String, settings: ElevenLabsSettings): Boolean {
@@ -121,7 +204,7 @@ class ElevenLabsService(private val context: Context) {
      */
     suspend fun testConnection(): Result<String> = withContext(Dispatchers.IO) {
         val apiKey = getApiKey().trim()
-        if (apiKey.isEmpty() || apiKey == "null" || apiKey.contains("MY_")) {
+        if (!hasValidApiKey()) {
             val missingMsg = "المفتاح مفقود: لم يتم ضبط ELEVENLABS_API_KEY في لوحة Secrets أو ملف .env"
             recordLog("فحص الاتصال", success = false, statusCode = null, message = missingMsg)
             return@withContext Result.failure(IllegalStateException(missingMsg))
@@ -184,7 +267,7 @@ class ElevenLabsService(private val context: Context) {
         text: String,
         settings: ElevenLabsSettings = configManager.getSettings(),
         forceRegenerate: Boolean = false
-    ): Result<File> = withContext(Dispatchers.IO) {
+    ): Result<File> = generationLock.withLock { withContext(Dispatchers.IO) {
         val cleanText = text.trim()
         if (cleanText.isEmpty()) {
             val err = "النص فارغ"
@@ -199,7 +282,7 @@ class ElevenLabsService(private val context: Context) {
         }
 
         val apiKey = getApiKey().trim()
-        if (apiKey.isEmpty() || apiKey == "null" || apiKey.contains("MY_")) {
+        if (!hasValidApiKey()) {
             val missingMsg = "المفتاح مفقود: لم يتم ضبط ELEVENLABS_API_KEY في لوحة Secrets أو ملف .env"
             recordLog(cleanText, success = false, statusCode = null, message = missingMsg)
             return@withContext Result.failure(IllegalStateException(missingMsg))
@@ -209,7 +292,29 @@ class ElevenLabsService(private val context: Context) {
         val outputFile = File(cacheDir, "el_$targetKey.mp3")
 
         try {
-            val url = "https://api.elevenlabs.io/v1/text-to-speech/${settings.voiceId.trim()}"
+            val proxy = BuildConfig.VOICE_SERVICE_URL.trim()
+            val useProxy = proxy.startsWith("https://")
+
+            if (!useProxy) {
+                val fromHistory = try {
+                    downloadFromHistory(cleanText, apiKey, settings.voiceId.trim())
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    Log.w("ElevenLabsService", "History lookup failed", e)
+                    null
+                }
+                if (fromHistory != null) {
+                    val temporary = File.createTempFile("history_", ".tmp", cacheDir)
+                    try {
+                        temporary.writeBytes(fromHistory)
+                        check(temporary.renameTo(outputFile)) { "تعذّر حفظ الصوت" }
+                    } finally { temporary.delete() }
+                    recordLog(cleanText, success = true, statusCode = 200, message = "تم استرجاع الصوت من سجل ElevenLabs بدون توليد جديد")
+                    return@withContext Result.success(outputFile)
+                }
+            }
+            val url = if (useProxy) proxy else "https://api.elevenlabs.io/v1/text-to-speech/${settings.voiceId.trim()}"
 
             val jsonBody = JSONObject().apply {
                 put("text", cleanText)
@@ -227,7 +332,7 @@ class ElevenLabsService(private val context: Context) {
 
             val request = Request.Builder()
                 .url(url)
-                .addHeader("xi-api-key", apiKey)
+                .apply { if (!useProxy) addHeader("xi-api-key", apiKey) }
                 .addHeader("Accept", "audio/mpeg")
                 .addHeader("Content-Type", "application/json")
                 .post(requestBody)
@@ -241,37 +346,45 @@ class ElevenLabsService(private val context: Context) {
                 return@withContext Result.failure(Exception(netMsg))
             }
 
-            if (!response.isSuccessful) {
-                val code = response.code
-                val rawBody = response.body?.string() ?: ""
-                val serverDetail = extractServerDetail(rawBody)
-                val fullErrorMsg = "رمز $code: $serverDetail"
-                recordLog(cleanText, success = false, statusCode = code, message = fullErrorMsg)
-                return@withContext Result.failure(Exception(fullErrorMsg))
+            response.use {
+                if (!response.isSuccessful) {
+                    val code = response.code
+                    val rawBody = response.body?.string() ?: ""
+                    val serverDetail = extractServerDetail(rawBody)
+                    val fullErrorMsg = "رمز $code: $serverDetail"
+                    recordLog(cleanText, success = false, statusCode = code, message = fullErrorMsg)
+                    return@withContext Result.failure(Exception(fullErrorMsg))
+                }
+
+                val bytes = response.body?.bytes()
+                if (bytes == null || bytes.isEmpty()) {
+                    val emptyMsg = "استجابة ElevenLabs لا تحتوي على بيانات صوتية (200 OK فارغ)"
+                    recordLog(cleanText, success = false, statusCode = 200, message = emptyMsg)
+                    return@withContext Result.failure(Exception(emptyMsg))
+                }
+
+                val temporary = File.createTempFile("speech_", ".tmp", cacheDir)
+                try {
+                    temporary.writeBytes(bytes)
+                    check(temporary.renameTo(outputFile)) { "تعذّر حفظ الصوت" }
+                } finally { temporary.delete() }
+
+                configManager.recordCharactersUsed(cleanText.length)
+                val successMsg = "تم توليد الصوت بنجاح (${cleanText.length} حرف)"
+                recordLog(cleanText, success = true, statusCode = 200, message = successMsg)
+
+                Result.success(outputFile)
             }
-
-            val bytes = response.body?.bytes()
-            if (bytes == null || bytes.isEmpty()) {
-                val emptyMsg = "استجابة ElevenLabs لا تحتوي على بيانات صوتية (200 OK فارغ)"
-                recordLog(cleanText, success = false, statusCode = 200, message = emptyMsg)
-                return@withContext Result.failure(Exception(emptyMsg))
-            }
-
-            outputFile.outputStream().use { fos ->
-                fos.write(bytes)
-            }
-
-            configManager.recordCharactersUsed(cleanText.length)
-            val successMsg = "تم توليد الصوت بنجاح (${cleanText.length} حرف)"
-            recordLog(cleanText, success = true, statusCode = 200, message = successMsg)
-
-            Result.success(outputFile)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Log.e("ElevenLabsService", "Generation failed", e)
             val unexpectedMsg = e.message ?: "خطأ غير متوقع أثناء التوليد"
             recordLog(cleanText, success = false, statusCode = null, message = unexpectedMsg)
             Result.failure(e)
         }
+    }
+
     }
 
     private fun extractServerDetail(rawBody: String): String {

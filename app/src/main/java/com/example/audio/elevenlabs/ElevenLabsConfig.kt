@@ -3,8 +3,10 @@ package com.example.audio.elevenlabs
 import android.content.Context
 import android.content.SharedPreferences
 
+const val GAME_VOICE_ID = "ECc3xM44reI7J5jdm8jB"
+
 data class ElevenLabsSettings(
-    val voiceId: String = "ECc3xM44reI7J5jdm8jB",
+    val voiceId: String = GAME_VOICE_ID,
     val modelId: String = "eleven_multilingual_v2",
     val stability: Float = 0.5f,
     val similarityBoost: Float = 0.75f,
@@ -18,7 +20,7 @@ class ElevenLabsConfigManager(context: Context) {
 
     fun getSettings(): ElevenLabsSettings {
         return ElevenLabsSettings(
-            voiceId = prefs.getString("voice_id", "ECc3xM44reI7J5jdm8jB") ?: "ECc3xM44reI7J5jdm8jB",
+            voiceId = GAME_VOICE_ID,
             modelId = prefs.getString("model_id", "eleven_multilingual_v2") ?: "eleven_multilingual_v2",
             stability = prefs.getFloat("stability", 0.5f),
             similarityBoost = prefs.getFloat("similarity_boost", 0.75f),

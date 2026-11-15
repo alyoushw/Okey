@@ -16,3 +16,10 @@
 local.properties
 .env
 debug.keystore
+
+__pycache__/
+*.pyc
+work/
+*.jks
+*.keystore
+!signing/okey-preview.keystore

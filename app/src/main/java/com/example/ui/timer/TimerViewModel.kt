@@ -6,9 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.AudioRecorderHelper
 import com.example.audio.SoundPlayer
 import com.example.audio.SpeechManager
-import com.example.audio.elevenlabs.ElevenLabsConfigManager
 import com.example.audio.elevenlabs.ElevenLabsService
-import com.example.audio.elevenlabs.ElevenLabsSettings
 import com.example.data.model.CustomSoundSlot
 import com.example.data.model.Player
 import com.example.data.repository.GameRepository
@@ -68,18 +66,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(TimerUiState())
     val uiState: StateFlow<TimerUiState> = _uiState.asStateFlow()
 
-    private val _elevenLabsSettings = MutableStateFlow(elevenLabsService.getConfigManager().getSettings())
-    val elevenLabsSettings: StateFlow<ElevenLabsSettings> = _elevenLabsSettings.asStateFlow()
-
-    private val _totalCharactersUsed = MutableStateFlow(elevenLabsService.getConfigManager().getTotalCharactersUsed())
-    val totalCharactersUsed: StateFlow<Long> = _totalCharactersUsed.asStateFlow()
-
-    private val _isGeneratingElevenLabs = MutableStateFlow<String?>(null)
-    val isGeneratingElevenLabs: StateFlow<String?> = _isGeneratingElevenLabs.asStateFlow()
-
-    private val _elevenLabsMessage = MutableStateFlow<String?>(null)
-    val elevenLabsMessage: StateFlow<String?> = _elevenLabsMessage.asStateFlow()
-
+    private var turnVersion = 0L
     private var timerJob: Job? = null
     private var lastEmittedSecond: Int = -1
     private var lastSpokenSecond: Int = -1
@@ -106,6 +93,9 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun observeGameSession() {
+        viewModelScope.launch {
+            com.example.data.repository.GameSessionManager.sessionVersion.collect { reset() }
+        }
         viewModelScope.launch {
             com.example.data.repository.GameSessionManager.players.collect { currentPlayers ->
                 if (currentPlayers.isNotEmpty()) {
@@ -162,8 +152,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setDuration(seconds: Int) {
+        turnVersion++
         val clamped = seconds.coerceIn(5, 300)
         timerJob?.cancel()
+        turnPrepJob?.cancel()
         speechManager.stop()
         soundPlayer.stopAll()
         _uiState.update {
@@ -179,6 +171,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectPlayer(index: Int) {
+        turnVersion++
         val state = _uiState.value
         if (state.players.isEmpty()) return
         val clampedIndex = index.coerceIn(0, state.players.size - 1)
@@ -211,113 +204,31 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
     private var turnPrepJob: kotlinx.coroutines.Job? = null
 
-    /**
-     * Manages turn announcement with ElevenLabs.
-     * 1. If already cached: plays immediately from disk with zero delay.
-     * 2. If not cached: generates on the fly with brief indicator.
-     * 3. If generation fails: shows specific error notice and starts timer without hanging!
-     * 4. When PLAYER_NAME mode is active: player's name takes priority over uploaded/recorded general clips.
-     */
+    /** Playback never waits for a network request. Names are prepared while setting up the game. */
     fun prepareAndAnnounceTurn(player: Player, onReadyToStartTimer: () -> Unit) {
         turnPrepJob?.cancel()
-        val settings = com.example.data.repository.SettingsRepository.getSettings(getApplication())
-
-        if (!settings.voiceAnnouncePlayer || settings.muteAll) {
-            _uiState.update { it.copy(turnPreparationMessage = null) }
+        val settings = repository.getSettings()
+        _uiState.update { it.copy(turnPreparationMessage = null, turnNoticeMessage = null) }
+        if (!settings.soundEnabled || !settings.voiceAnnouncePlayer || settings.muteAll || settings.masterVolume <= 0f) {
             onReadyToStartTimer()
             return
         }
-
-        turnPrepJob = viewModelScope.launch {
-            val elevenSettings = _elevenLabsSettings.value
-
-            // 1. CUSTOM_PHRASE mode
-            if (settings.turnAnnouncementMode.equals("CUSTOM_PHRASE", ignoreCase = true)) {
-                val phrase = settings.turnCustomPhrase.trim().ifBlank { "اللي بعده" }
-                val cached = elevenLabsService.getCachedFile(phrase, elevenSettings)
-
-                if (cached != null && cached.exists() && cached.length() > 0) {
-                    _uiState.update { it.copy(turnPreparationMessage = null) }
-                    recorderHelper.playAudio(cached.absolutePath, settings.masterVolume) {
-                        if (_uiState.value.status == TimerStatus.RUNNING) {
-                            onReadyToStartTimer()
-                        }
-                    }
-                } else {
-                    _uiState.update { it.copy(turnPreparationMessage = "جارٍ تجهيز صوت: $phrase...") }
-                    val result = elevenLabsService.generateSpeech(phrase, elevenSettings, forceRegenerate = false)
-                    _uiState.update { it.copy(turnPreparationMessage = null) }
-
-                    result.fold(
-                        onSuccess = { file ->
-                            recorderHelper.playAudio(file.absolutePath, settings.masterVolume) {
-                                if (_uiState.value.status == TimerStatus.RUNNING) {
-                                    onReadyToStartTimer()
-                                }
-                            }
-                        },
-                        onFailure = { err ->
-                            _uiState.update { it.copy(turnNoticeMessage = err.message) }
-                            onReadyToStartTimer()
-                        }
-                    )
-                }
-                return@launch
+        val phrase = if (settings.turnAnnouncementMode == "CUSTOM_PHRASE") {
+            settings.turnCustomPhrase.trim().ifBlank { "اللي بعده" }
+        } else {
+            val template = repository.getCustomSoundSlots().find { it.id == "turn_general" }
+                ?.customText?.ifBlank { "يلا يا {الاسم}، دورك" } ?: "يلا يا {الاسم}، دورك"
+            template.replace("{الاسم}", player.name.trim())
+        }
+        val version = turnVersion
+        val cached = elevenLabsService.getCachedFile(phrase, elevenLabsService.getConfigManager().getSettings())
+        if (cached != null) {
+            recorderHelper.playAudio(cached.absolutePath, settings.masterVolume) {
+                if (version == turnVersion && _uiState.value.status == TimerStatus.RUNNING) onReadyToStartTimer()
             }
-
-            // 2. PLAYER_NAME mode:
-            // Send exact name without diacritics or automatic alterations
-            val exactName = player.name.trim()
-            val slots = _uiState.value.customSoundSlots
-
-            // Player-specific slot (targetPlayerId == player.id)
-            val specificSlot = slots.find { it.targetPlayerId == player.id && it.isEnabled }
-            if (specificSlot != null && (!specificSlot.uploadedAudioPath.isNullOrBlank() ||
-                        !specificSlot.recordingPath.isNullOrBlank() ||
-                        !specificSlot.elevenLabsAudioPath.isNullOrBlank())) {
-                _uiState.update { it.copy(turnPreparationMessage = null) }
-                speechManager.playSlot(specificSlot, exactName, settings.masterVolume, settings.muteAll) {
-                    if (_uiState.value.status == TimerStatus.RUNNING) {
-                        onReadyToStartTimer()
-                    }
-                }
-                return@launch
-            }
-
-            // Template from general slot or default phrase without diacritics
-            val turnSlot = slots.find { it.id == "turn_general" }
-            val rawTemplate = turnSlot?.customText?.ifBlank { "يلا يا {الاسم}، دورك" }
-                ?: "يلا يا {الاسم}، دورك"
-            val phrase = rawTemplate.replace("{الاسم}", exactName).trim()
-
-            val cached = elevenLabsService.getCachedFile(phrase, elevenSettings)
-            if (cached != null && cached.exists() && cached.length() > 0) {
-                _uiState.update { it.copy(turnPreparationMessage = null) }
-                recorderHelper.playAudio(cached.absolutePath, settings.masterVolume) {
-                    if (_uiState.value.status == TimerStatus.RUNNING) {
-                        onReadyToStartTimer()
-                    }
-                }
-            } else {
-                // Not cached yet: generate on the fly with brief UI indicator
-                _uiState.update { it.copy(turnPreparationMessage = "جارٍ تجهيز صوت: $exactName...") }
-                val result = elevenLabsService.generateSpeech(phrase, elevenSettings, forceRegenerate = false)
-                _uiState.update { it.copy(turnPreparationMessage = null) }
-
-                result.fold(
-                    onSuccess = { file ->
-                        recorderHelper.playAudio(file.absolutePath, settings.masterVolume) {
-                            if (_uiState.value.status == TimerStatus.RUNNING) {
-                                onReadyToStartTimer()
-                            }
-                        }
-                    },
-                    onFailure = { err ->
-                        _uiState.update { it.copy(turnNoticeMessage = err.message) }
-                        // Never freeze app: start timer immediately on failure
-                        onReadyToStartTimer()
-                    }
-                )
+        } else {
+            speechManager.playBundled("turn_start", settings.masterVolume) {
+                if (version == turnVersion && _uiState.value.status == TimerStatus.RUNNING) onReadyToStartTimer()
             }
         }
     }
@@ -326,265 +237,8 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(turnNoticeMessage = null) }
     }
 
-    fun updatePlayerColor(playerId: Int, newColorHex: Long) {
-        viewModelScope.launch {
-            repository.updatePlayerColor(playerId, newColorHex)
-            refreshPlayers()
-        }
-    }
-
-    fun updatePlayerPhoneticName(playerId: Int, phoneticName: String) {
-        viewModelScope.launch {
-            repository.updatePlayerPhoneticName(playerId, phoneticName)
-            val player = _uiState.value.players.find { it.id == playerId }
-            if (player != null) {
-                // Pre-generate audio for this player alone without touching others
-                val slots = _uiState.value.customSoundSlots
-                val turnSlot = slots.find { it.id == "turn_general" }
-                val rawTemplate = turnSlot?.customText?.ifBlank { "يلا يا {الاسم}، دورك" } ?: "يلا يا {الاسم}، دورك"
-                val targetName = phoneticName.ifBlank { player.name }.trim()
-                val phrase = rawTemplate.replace("{الاسم}", targetName).trim()
-                elevenLabsService.generateSpeech(phrase, _elevenLabsSettings.value, forceRegenerate = false)
-            }
-            refreshPlayers()
-        }
-    }
-
-    fun testPronunciation(name: String, phonetic: String) {
-        val settings = _uiState.value.settings
-        val target = phonetic.ifBlank { name }.trim()
-        val slots = _uiState.value.customSoundSlots
-        val turnSlot = slots.find { it.id == "turn_general" }
-        val rawTemplate = turnSlot?.customText?.ifBlank { "يلا يا {الاسم}، دورك" } ?: "يلا يا {الاسم}، دورك"
-        val phrase = rawTemplate.replace("{الاسم}", target).trim()
-
-        viewModelScope.launch {
-            val res = elevenLabsService.generateSpeech(phrase, _elevenLabsSettings.value, forceRegenerate = false)
-            res.fold(
-                onSuccess = { file ->
-                    recorderHelper.playAudio(file.absolutePath, settings.masterVolume)
-                },
-                onFailure = { err ->
-                    _elevenLabsMessage.value = err.message
-                }
-            )
-        }
-    }
-
-    // ==========================================
-    // Custom Sound Slot Actions
-    // ==========================================
-
-    fun saveCustomSlot(slot: CustomSoundSlot) {
-        repository.saveCustomSoundSlot(slot, _uiState.value.players)
-        loadCustomSoundSlots()
-    }
-
-    fun deleteCustomSlot(slotId: String) {
-        repository.deleteCustomSoundSlot(slotId, _uiState.value.players)
-        loadCustomSoundSlots()
-    }
-
-    fun resetSlotToDefault(slotId: String) {
-        repository.resetSlotToDefault(slotId, _uiState.value.players)
-        loadCustomSoundSlots()
-    }
-
-    fun resetAllSlotsToDefault() {
-        repository.resetAllSlotsToDefault(_uiState.value.players)
-        loadCustomSoundSlots()
-    }
-
-    fun exportCustomSoundsJson(): String {
-        return repository.exportCustomSoundsJson(_uiState.value.players)
-    }
-
-    fun importCustomSoundsJson(json: String): Boolean {
-        val success = repository.importCustomSoundsJson(json)
-        if (success) {
-            loadCustomSoundSlots()
-        }
-        return success
-    }
-
-    fun testSlot(slot: CustomSoundSlot, samplePlayerName: String = "") {
-        val settings = _uiState.value.settings
-        val name = samplePlayerName.ifBlank { _uiState.value.activePlayer.name }
-        speechManager.playSlot(slot, name, settings.masterVolume, settings.muteAll)
-    }
-
-    // ==========================================
-    // ElevenLabs AI Voice Actions & Pre-generation
-    // ==========================================
-
-    fun updateElevenLabsSettings(newSettings: ElevenLabsSettings) {
-        elevenLabsService.getConfigManager().saveSettings(newSettings)
-        _elevenLabsSettings.value = newSettings
-    }
-
-    fun testElevenLabsVoice(phrase: String = "يلا يا خالد، دورك!") {
-        viewModelScope.launch {
-            _isGeneratingElevenLabs.value = "TEST"
-            _elevenLabsMessage.value = null
-            val currentSettings = _elevenLabsSettings.value
-            val result = elevenLabsService.generateSpeech(phrase, currentSettings, forceRegenerate = false)
-            result.fold(
-                onSuccess = { file ->
-                    _totalCharactersUsed.value = elevenLabsService.getConfigManager().getTotalCharactersUsed()
-                    recorderHelper.playAudio(file.absolutePath, _uiState.value.settings.masterVolume)
-                    _isGeneratingElevenLabs.value = null
-                },
-                onFailure = { error ->
-                    _isGeneratingElevenLabs.value = null
-                    _elevenLabsMessage.value = error.message ?: "فشل في توليد الصوت عبر ElevenLabs"
-                }
-            )
-        }
-    }
-
-    fun generateSlotElevenLabs(slot: CustomSoundSlot, samplePlayerName: String = "", force: Boolean = true) {
-        viewModelScope.launch {
-            _isGeneratingElevenLabs.value = slot.id
-            _elevenLabsMessage.value = null
-
-            val targetName = samplePlayerName.ifBlank {
-                _uiState.value.players.find { it.id == slot.targetPlayerId }?.name ?: "خالد"
-            }
-            val textToSynthesize = if (slot.customText.isNotBlank()) {
-                slot.customText.replace("{الاسم}", targetName).trim()
-            } else {
-                when (slot.category) {
-                    com.example.data.model.SoundSlotCategory.TURN_START -> "يَلَّا يَا $targetName، دَوْرَك!"
-                    com.example.data.model.SoundSlotCategory.COUNTDOWN_5 -> "خَمْسَة"
-                    com.example.data.model.SoundSlotCategory.COUNTDOWN_4 -> "أَرْبَعَة"
-                    com.example.data.model.SoundSlotCategory.COUNTDOWN_3 -> "ثَلَاثَة"
-                    com.example.data.model.SoundSlotCategory.COUNTDOWN_2 -> "اِثْنَيْن"
-                    com.example.data.model.SoundSlotCategory.COUNTDOWN_1 -> "وَاحِد"
-                    com.example.data.model.SoundSlotCategory.TIME_UP -> "اِسْحَبْ ثَلَاثْ يَا غَشِيم!"
-                    else -> slot.title
-                }
-            }
-
-            val currentSettings = _elevenLabsSettings.value
-            val result = elevenLabsService.generateSpeech(textToSynthesize, currentSettings, forceRegenerate = force)
-            result.fold(
-                onSuccess = { file ->
-                    val updatedSlot = slot.copy(
-                        elevenLabsAudioPath = file.absolutePath,
-                        lastGeneratedChars = textToSynthesize.length,
-                        lastGeneratedTimestamp = System.currentTimeMillis()
-                    )
-                    saveCustomSlot(updatedSlot)
-                    _totalCharactersUsed.value = elevenLabsService.getConfigManager().getTotalCharactersUsed()
-                    _isGeneratingElevenLabs.value = null
-                    _elevenLabsMessage.value = "تم توليد الصوت وحفظه محلياً بنجاح ⚡"
-                    recorderHelper.playAudio(file.absolutePath, _uiState.value.settings.masterVolume)
-                },
-                onFailure = { error ->
-                    _isGeneratingElevenLabs.value = null
-                    _elevenLabsMessage.value = error.message ?: "فشل في توليد الصوت"
-                }
-            )
-        }
-    }
-
-    fun pregenerateAllGameSounds(force: Boolean = true) {
-        viewModelScope.launch {
-            _isGeneratingElevenLabs.value = "ALL"
-            _elevenLabsMessage.value = "جارٍ توليد كل الأصوات بالصوت الأساسي وتخزينها..."
-
-            val slots = _uiState.value.customSoundSlots
-            var successCount = 0
-            for (slot in slots) {
-                if (!slot.isEnabled) continue
-
-                if (slot.id == "turn_general" || slot.category == com.example.data.model.SoundSlotCategory.TURN_START) {
-                    val rawTemplate = slot.customText.ifBlank { "يلا يا {الاسم}، دورك" }
-                    for (player in _uiState.value.players) {
-                        val pName = player.name.trim()
-                        val text = rawTemplate.replace("{الاسم}", pName).trim()
-                        val res = elevenLabsService.generateSpeech(text, _elevenLabsSettings.value, forceRegenerate = force)
-                        if (res.isSuccess) successCount++
-                    }
-                    val previewText = rawTemplate.replace("{الاسم}", "اللاعب").trim()
-                    val res = elevenLabsService.generateSpeech(previewText, _elevenLabsSettings.value, forceRegenerate = force)
-                    res.onSuccess { file ->
-                        val updated = slot.copy(
-                            elevenLabsAudioPath = file.absolutePath,
-                            lastGeneratedChars = previewText.length,
-                            lastGeneratedTimestamp = System.currentTimeMillis()
-                        )
-                        saveCustomSlot(updated)
-                        successCount++
-                    }
-                    continue
-                }
-
-                val text = if (slot.customText.isNotBlank()) {
-                    slot.customText.trim()
-                } else {
-                    when (slot.category) {
-                        com.example.data.model.SoundSlotCategory.COUNTDOWN_5 -> "خَمْسَة"
-                        com.example.data.model.SoundSlotCategory.COUNTDOWN_4 -> "أَرْبَعَة"
-                        com.example.data.model.SoundSlotCategory.COUNTDOWN_3 -> "ثَلَاثَة"
-                        com.example.data.model.SoundSlotCategory.COUNTDOWN_2 -> "اِثْنَيْن"
-                        com.example.data.model.SoundSlotCategory.COUNTDOWN_1 -> "وَاحِد"
-                        com.example.data.model.SoundSlotCategory.TIME_UP -> "اِسْحَبْ ثَلَاثْ يَا غَشِيم!"
-                        else -> slot.title
-                    }
-                }
-
-                if (text.isNotBlank()) {
-                    val result = elevenLabsService.generateSpeech(text, _elevenLabsSettings.value, forceRegenerate = force)
-                    result.onSuccess { file ->
-                        val updated = slot.copy(
-                            elevenLabsAudioPath = file.absolutePath,
-                            lastGeneratedChars = text.length,
-                            lastGeneratedTimestamp = System.currentTimeMillis()
-                        )
-                        saveCustomSlot(updated)
-                        successCount++
-                    }
-                }
-            }
-
-            // Also generate the custom turn switching phrase
-            val customPhrase = _uiState.value.settings.turnCustomPhrase.trim().ifBlank { "اللي بعده" }
-            val customRes = elevenLabsService.generateSpeech(customPhrase, _elevenLabsSettings.value, forceRegenerate = force)
-            if (customRes.isSuccess) successCount++
-
-            _totalCharactersUsed.value = elevenLabsService.getConfigManager().getTotalCharactersUsed()
-            _isGeneratingElevenLabs.value = null
-            _elevenLabsMessage.value = "اكتمل توليد كل الأصوات ($successCount صوت مخزّن محلياً) ⚡"
-        }
-    }
-
-    fun resetElevenLabsCharacters() {
-        elevenLabsService.getConfigManager().resetCharactersCounter()
-        _totalCharactersUsed.value = 0L
-    }
-
-    fun testTurnCustomPhrase(phrase: String = "") {
-        val settings = _uiState.value.settings
-        val targetPhrase = phrase.ifBlank { settings.turnCustomPhrase }.ifBlank { "اللي بعده" }.trim()
-        viewModelScope.launch {
-            val res = elevenLabsService.generateSpeech(targetPhrase, _elevenLabsSettings.value, forceRegenerate = false)
-            res.fold(
-                onSuccess = { file ->
-                    recorderHelper.playAudio(file.absolutePath, settings.masterVolume)
-                },
-                onFailure = { err ->
-                    _elevenLabsMessage.value = err.message
-                }
-            )
-        }
-    }
-
-    fun clearElevenLabsMessage() {
-        _elevenLabsMessage.value = null
-    }
-
     fun startOrResume() {
+        turnVersion++
         val state = _uiState.value
         when (state.status) {
             TimerStatus.IDLE, TimerStatus.FINISHED -> {
@@ -614,6 +268,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun pause() {
+        turnVersion++
         timerJob?.cancel()
         turnPrepJob?.cancel()
         speechManager.stop()
@@ -622,6 +277,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun reset() {
+        turnVersion++
         timerJob?.cancel()
         turnPrepJob?.cancel()
         speechManager.stop()
@@ -638,6 +294,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun nextPlayer() {
+        turnVersion++
         timerJob?.cancel()
         turnPrepJob?.cancel()
         speechManager.stop()
@@ -668,32 +325,6 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun runAudioTestSimulation() {
-        timerJob?.cancel()
-        turnPrepJob?.cancel()
-        speechManager.stop()
-        soundPlayer.stopAll()
-
-        val testSec = 10
-        val settings = _uiState.value.settings
-        _uiState.update {
-            it.copy(
-                initialSeconds = testSec,
-                remainingMillis = testSec * 1000L,
-                status = TimerStatus.RUNNING,
-                isCriticalWarning = false,
-                turnNoticeMessage = null
-            )
-        }
-
-        val player = _uiState.value.activePlayer
-        prepareAndAnnounceTurn(player) {
-            if (_uiState.value.status == TimerStatus.RUNNING) {
-                startLoop()
-            }
-        }
-    }
-
     fun onScreenTapped() {
         if (_uiState.value.settings.tapToAdvance) {
             nextPlayer()
@@ -704,24 +335,30 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         timerJob?.cancel()
         lastEmittedSecond = _uiState.value.remainingSeconds
         lastSpokenSecond = -1
-        lastTickTime = System.currentTimeMillis()
-        val startTime = System.currentTimeMillis()
+        lastTickTime = android.os.SystemClock.elapsedRealtime()
+        val startTime = android.os.SystemClock.elapsedRealtime()
         val totalRemaining = _uiState.value.remainingMillis
+        val version = turnVersion
 
         timerJob = viewModelScope.launch {
             while (true) {
                 delay(25)
-                val elapsed = System.currentTimeMillis() - startTime
+                val elapsed = android.os.SystemClock.elapsedRealtime() - startTime
                 val newRemaining = (totalRemaining - elapsed).coerceAtLeast(0L)
                 val currentSec = ((newRemaining + 999) / 1000).toInt()
                 val settings = _uiState.value.settings
                 val slots = _uiState.value.customSoundSlots
 
-                val isCritical = currentSec in 1..5
+                // "Final five seconds" toggle owns every special effect of seconds 5..1:
+                // spoken numbers, accelerated/louder urgent ticks and the strong vibration.
+                // When it is off those seconds behave like any ordinary second.
+                val finalFiveEnabled = settings.soundEnabled && !settings.muteAll && settings.voiceCountdownEnabled
+                val isCritical = currentSec in 1..5 && finalFiveEnabled
                 val isElevated = currentSec in 6..10
+                val escalating = settings.tickSoundMode == "ESCALATING"
 
                 // 10 seconds warning announcement
-                if (currentSec == 10 && lastSpokenSecond != 10 && settings.warningSoundEnabled) {
+                if (currentSec == 10 && lastSpokenSecond != 10 && settings.soundEnabled && settings.warningSoundEnabled) {
                     lastSpokenSecond = 10
                     speechManager.play10sWarning(
                         slots = slots,
@@ -731,7 +368,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 // Voice countdown for numbers 5 down to 1
-                if (currentSec in 1..5 && currentSec != lastSpokenSecond && settings.voiceCountdownEnabled) {
+                if (isCritical && currentSec != lastSpokenSecond) {
                     lastSpokenSecond = currentSec
                     speechManager.playCountdownNumber(
                         number = currentSec,
@@ -745,11 +382,11 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 // > 5s: 1 tick/sec (1000ms)
                 // 4..5s: 2 ticks/sec (500ms)
                 // 1..3s: 3 ticks/sec (333ms)
-                val now = System.currentTimeMillis()
-                val tickIntervalMs = if (settings.tickSoundMode == "ESCALATING") {
+                val now = android.os.SystemClock.elapsedRealtime()
+                val tickIntervalMs = if (escalating) {
                     when {
-                        currentSec in 1..3 -> 333L // 3 ticks/sec
-                        currentSec in 4..5 -> 500L // 2 ticks/sec
+                        isCritical && currentSec in 1..3 -> 333L // 3 ticks/sec
+                        isCritical && currentSec in 4..5 -> 500L // 2 ticks/sec
                         else -> 1000L              // 1 tick/sec
                     }
                 } else {
@@ -761,20 +398,20 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                     lastEmittedSecond = currentSec
 
                     // Escalating volume & pitch calculation
-                    val volumeFactor = if (settings.tickSoundMode == "ESCALATING") {
+                    val volumeFactor = if (escalating) {
                         when {
-                            currentSec in 1..5 -> 0.70f + ((5 - currentSec) / 4.0f) * 0.30f
-                            currentSec in 6..10 -> 0.25f + ((10 - currentSec) / 4.0f) * 0.30f
+                            isCritical -> 0.70f + ((5 - currentSec) / 4.0f) * 0.30f
+                            isElevated -> 0.25f + ((10 - currentSec) / 4.0f) * 0.30f
                             else -> 0.25f
                         }
                     } else {
                         0.60f
                     }
 
-                    val pitchFactor = if (settings.tickSoundMode == "ESCALATING") {
+                    val pitchFactor = if (escalating) {
                         when {
-                            currentSec in 1..5 -> 1.15f + ((5 - currentSec) * 0.03f)
-                            currentSec in 6..10 -> 1.0f + ((10 - currentSec) * 0.02f)
+                            isCritical -> 1.15f + ((5 - currentSec) * 0.03f)
+                            isElevated -> 1.0f + ((10 - currentSec) * 0.02f)
                             else -> 1.0f
                         }
                     } else {
@@ -821,11 +458,11 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                     speechManager.playTimeUp(
                         slots = slots,
                         masterVolume = settings.masterVolume,
-                        muteAll = settings.muteAll,
+                        muteAll = settings.muteAll || !settings.soundEnabled || !settings.voiceTimeUpPenalty,
                         onFinished = {
                             viewModelScope.launch {
                                 delay(600)
-                                if (_uiState.value.status == TimerStatus.FINISHED) {
+                                if (version == turnVersion && _uiState.value.status == TimerStatus.FINISHED) {
                                     nextPlayer()
                                 }
                             }
@@ -847,6 +484,8 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         timerJob?.cancel()
+        turnPrepJob?.cancel()
+        soundPlayer.release()
         speechManager.shutdown()
         soundPlayer.release()
     }
