@@ -40,6 +40,10 @@ fun SettingsScreen(
         SettingToggleRow("الأصوات", currentSettings.soundEnabled && !currentSettings.muteAll) {
             onSettingsChanged(currentSettings.copy(soundEnabled = it, muteAll = false))
         }
+        SettingToggleRow("صوت آخر ٥ ثوانٍ (٥، ٤، ٣، ٢، ١)", currentSettings.voiceCountdownEnabled,
+            tag = "voice_countdown_toggle") {
+            onSettingsChanged(currentSettings.copy(voiceCountdownEnabled = it))
+        }
         if (currentSettings.soundEnabled) {
             Text("مستوى الصوت")
             Slider(
@@ -50,14 +54,17 @@ fun SettingsScreen(
             SettingToggleRow("تكات المؤقّت", currentSettings.tickSoundEnabled) {
                 onSettingsChanged(currentSettings.copy(tickSoundEnabled = it))
             }
+            if (currentSettings.tickSoundEnabled) {
+                SettingToggleRow("تسارع التكات آخر الدور", currentSettings.tickSoundMode == "ESCALATING",
+                    tag = "tick_escalation_toggle") {
+                    onSettingsChanged(currentSettings.copy(tickSoundMode = if (it) "ESCALATING" else "FIXED"))
+                }
+            }
             SettingToggleRow("نطق اسم اللاعب", currentSettings.voiceAnnouncePlayer) {
                 onSettingsChanged(currentSettings.copy(voiceAnnouncePlayer = it))
             }
             SettingToggleRow("تنبيه آخر عشر ثوانٍ", currentSettings.warningSoundEnabled) {
                 onSettingsChanged(currentSettings.copy(warningSoundEnabled = it))
-            }
-            SettingToggleRow("العد التنازلي الصوتي", currentSettings.voiceCountdownEnabled) {
-                onSettingsChanged(currentSettings.copy(voiceCountdownEnabled = it))
             }
             SettingToggleRow("عبارة انتهاء الدور", currentSettings.voiceTimeUpPenalty) {
                 onSettingsChanged(currentSettings.copy(voiceTimeUpPenalty = it))
@@ -88,9 +95,9 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SettingToggleRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SettingToggleRow(title: String, checked: Boolean, tag: String = "", onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(title, modifier = Modifier.weight(1f).padding(end = 12.dp))
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = onChange, modifier = Modifier.testTag(tag))
     }
 }

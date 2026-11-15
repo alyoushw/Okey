@@ -20,12 +20,31 @@ jobs:
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36.1" "build-tools;36.0.0"'
       - name: Test voice service without calling ElevenLabs
         run: python3 -m unittest discover -s voice_service -v
+      - name: Restore existing game voices or generate missing clips
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ECc3xM44reI7J5jdm8jB
+        run: |
+          if [ -n "$ELEVENLABS_API_KEY" ]; then
+            python3 scripts/generate_game_audio.py
+            python3 scripts/generate_game_audio.py --check
+          else
+            echo "Voice key is not configured; building an interface preview."
+          fi
+      # The API key above belongs to that step only. It never reaches Gradle or the APK.
       - name: Build and check Android preview
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: okey-preview
           path: app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: game-voice-pack
+          path: app/src/main/assets/game_audio/*.mp3
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         with:

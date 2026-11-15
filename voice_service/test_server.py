@@ -32,8 +32,10 @@ class VoiceServiceTests(unittest.TestCase):
             try:
                 with request("خالد") as response:
                     self.assertEqual(b"audio", response.read())
-                with request("خالد") as response:
-                    self.assertEqual(b"audio", response.read())
+                # Already prepared audio remains playable even if the provider key is unavailable.
+                with patch.dict("os.environ", {"ELEVENLABS_API_KEY": ""}):
+                    with request("خالد") as response:
+                        self.assertEqual(b"audio", response.read())
                 self.assertEqual(1, provider.call_count)
                 with self.assertRaises(HTTPError) as error:
                     request("فهد")

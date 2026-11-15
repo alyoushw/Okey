@@ -10,10 +10,11 @@ from pathlib import Path
 import sys
 from threading import Lock
 import time
+import tempfile
 import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from generate_game_audio import generate
+from generate_game_audio import generate, DEFAULT_VOICE_ID
 
 PREFIX, SUFFIX = "يلا يا ", "، دورك"
 LOCK = Lock()
@@ -53,10 +54,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(400, b'{"detail":"Invalid player name"}')
             return
         key = os.environ.get("ELEVENLABS_API_KEY", "")
-        voice = os.environ.get("ELEVENLABS_VOICE_ID", "ECc3xM44reI7J5jdm8jB")
-        if not key:
-            self.reply(503, b'{"detail":"Voice service unavailable"}')
-            return
+        voice = os.environ.get("ELEVENLABS_VOICE_ID", DEFAULT_VOICE_ID)
         directory = Path(os.environ.get("VOICE_CACHE_DIR", "work/voice-cache"))
         directory.mkdir(parents=True, exist_ok=True)
         cache = directory / (sha256((voice + text).encode()).hexdigest() + ".mp3")
@@ -71,8 +69,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(429, b'{"detail":"Try again later"}')
                 return
             recent.append(now)
-            if cache.exists():
+            if cache.is_file() and cache.stat().st_size > 0:
                 self.reply(200, cache.read_bytes(), "audio/mpeg")
+                return
+            if not key:
+                self.reply(503, b'{"detail":"Voice service unavailable"}')
                 return
             day = int(time.time() // 86400)
             if DAILY[0] != day:
@@ -84,7 +85,15 @@ class Handler(BaseHTTPRequestHandler):
             DAILY[1] += 1
             try:
                 content = generate(text, key, voice)
-                cache.write_bytes(content)
+                temporary = None
+                try:
+                    with tempfile.NamedTemporaryFile(dir=directory, suffix=".tmp", delete=False) as output:
+                        temporary = Path(output.name)
+                        output.write(content)
+                    temporary.replace(cache)
+                finally:
+                    if temporary is not None:
+                        temporary.unlink(missing_ok=True)
             except (urllib.error.URLError, ValueError, OSError):
                 self.reply(502, b'{"detail":"Could not prepare voice"}')
                 return

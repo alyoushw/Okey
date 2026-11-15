@@ -74,6 +74,32 @@ class PublicGameFlowTest {
         compose.onNodeWithText("سجل المحاولات 📋").assertDoesNotExist()
     }
 
+    @Test fun finalFiveSecondsVoiceCanBeDisabledIndependentlyOfTicks() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val repository = GameRepository(app)
+        val settings = com.example.data.repository.SettingsState(soundEnabled = false)
+        val state = androidx.compose.runtime.mutableStateOf(settings)
+        compose.setContent {
+            MaterialTheme {
+                com.example.ui.settings.SettingsScreen(state.value, {
+                    state.value = it
+                    repository.saveSettings(it)
+                })
+            }
+        }
+        compose.onNodeWithTag("voice_countdown_toggle").performScrollTo().assertIsOn().performClick()
+        compose.runOnIdle {
+            assertFalse(repository.getSettings().voiceCountdownEnabled)
+            assertTrue(repository.getSettings().tickSoundEnabled)
+            state.value = state.value.copy(soundEnabled = true)
+        }
+        compose.onNodeWithTag("tick_escalation_toggle").performScrollTo().assertIsOn().performClick()
+        compose.runOnIdle {
+            assertEquals("FIXED", repository.getSettings().tickSoundMode)
+            assertFalse(repository.getSettings().voiceCountdownEnabled)
+        }
+    }
+
     @Test fun completedGameMovesToHistoryAndCannotBeSavedTwice() = runBlocking {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         val app = ApplicationProvider.getApplicationContext<Application>()
