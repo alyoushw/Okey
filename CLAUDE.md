@@ -4,7 +4,9 @@
 - **Every time a work session changes the app, finish by giving the user a direct APK download link.**
   Start from `main`. Pushing `main` or a `ccr-*` / `claude/*` branch runs `.github/workflows/android.yml`,
   which builds the APK and uploads it to the `preview-latest` release (other branches build but never publish).
-  When the work is done, open a pull request to `main` so the next session starts from it. Wait for that run to succeed, then give this link:
+  When the work is done, open a pull request to `main` so the next session starts from it.
+  **The owner has given standing permission to merge that pull request yourself** once its checks pass;
+  the owner does not want to merge by hand. Merge it (normal merge, never force-push `main`) and say so. Wait for that run to succeed, then give this link:
   https://github.com/alyoushw/Okey/releases/download/preview-latest/Okey.apk
   If the run fails, fix it before reporting; never hand over a link to a stale build without saying so.
 - Voices: `ELEVENLABS_API_KEY` is a GitHub Actions secret (must be the real `sk_...` key, not the key ID).
