@@ -50,8 +50,9 @@ jobs:
       # Direct download link that always points at the newest successful build:
       # https://github.com/alyoushw/Okey/releases/download/preview-latest/Okey.apk
       # Only the trusted branches may replace what users download and get as an update.
+      # A merge into main ships nothing new (its branch already published), so it does not publish again.
       - name: Publish direct download link
-        if: github.event_name != 'pull_request' && (github.ref_name == 'main' || startsWith(github.ref_name, 'ccr-') || startsWith(github.ref_name, 'claude/'))
+        if: github.event_name != 'pull_request' && !startsWith(github.event.head_commit.message, 'Merge pull request') && (github.ref_name == 'main' || startsWith(github.ref_name, 'ccr-') || startsWith(github.ref_name, 'claude/'))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
