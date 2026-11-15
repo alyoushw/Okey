@@ -1,0 +1,30 @@
+name: Direct APK download
+on:
+  pull_request:
+    paths:
+      - .github/workflows/publish-apk.yml
+permissions:
+  contents: read
+jobs:
+  publish:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/public-cleanup'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Publish the verified APK with the application name
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p downloads
+          gh run download 43721619222 --repo "$GITHUB_REPOSITORY" --name okey-preview --dir downloads
+          echo 'fc3ed2b100443a46d9b6c66961eaae9f80f244254de655aefb510d917d1f9166  downloads/app-debug.apk' | sha256sum -c -
+          okey_apk_name='حاسبة Okey.apk'
+          mv downloads/app-debug.apk "downloads/$okey_apk_name"
+          printf '%s\n' 'نسخة معاينة من حاسبة Okey مع صفحة النقاط المبسطة وخيارات آخر خمس ثوانٍ. تجهيز حزمة الأصوات الطبيعية وخدمة الأسماء ينتظر إعداد ElevenLabs.' > downloads/notes.md
+          if gh release view preview-v1.1 --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload preview-v1.1 "downloads/$okey_apk_name#$okey_apk_name" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create preview-v1.1 "downloads/$okey_apk_name#$okey_apk_name" --repo "$GITHUB_REPOSITORY" --target ad01634fc21998f9a3fea92543c8d2c1bb58f1aa --prerelease --latest=false --title 'حاسبة Okey' --notes-file downloads/notes.md
+          fi
