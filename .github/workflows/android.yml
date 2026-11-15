@@ -4,7 +4,7 @@ on:
   push:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -39,6 +39,21 @@ jobs:
         env:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --stacktrace
+      # Direct download link that always points at the newest successful build:
+      # https://github.com/alyoushw/Okey/releases/download/preview-latest/Okey.apk
+      - name: Publish direct download link
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Okey.apk
+          notes="آخر نسخة تجريبية — الفرع ${GITHUB_REF_NAME} — ${GITHUB_SHA::7}"
+          if gh release view preview-latest > /dev/null 2>&1; then
+            gh release upload preview-latest Okey.apk --clobber
+            gh release edit preview-latest --notes "$notes"
+          else
+            gh release create preview-latest Okey.apk --target "$GITHUB_SHA" --prerelease --latest=false --title "حاسبة Okey — آخر نسخة" --notes "$notes"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: okey-preview
