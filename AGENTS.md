@@ -2,8 +2,7 @@
 
 **Read this before changing anything.**
 
-- The current, working version of the app lives on branch `ccr-38d80529-ie3z1v`
-  (and on `main` once it is merged). Start every task from that branch.
+- The current, working version of the app is `main`. Start every task from `main`.
 - **Do not use or continue `codex/public-cleanup`.** It is an old snapshot; everything in it is already
   included in the current branch together with many later fixes. Building on it would undo them.
 - Never force-push, never delete branches or the `preview-latest` / `music-pack` releases.

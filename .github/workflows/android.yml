@@ -60,7 +60,7 @@ jobs:
       # https://github.com/alyoushw/Okey/releases/download/preview-latest/Okey.apk
       # Only the trusted branches may replace what users download and get as an update.
       - name: Publish direct download link
-        if: github.event_name != 'pull_request' && (github.ref_name == 'main' || github.ref_name == 'ccr-38d80529-ie3z1v')
+        if: github.event_name != 'pull_request' && (github.ref_name == 'main' || startsWith(github.ref_name, 'ccr-') || startsWith(github.ref_name, 'claude/'))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
