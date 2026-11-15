@@ -49,6 +49,13 @@ class ElevenLabsService(private val context: Context) {
         }
 
     companion object {
+        @Volatile private var bundledIndex: Map<String, String>? = null
+
+        /** Same rule as scripts/generate_game_audio.py: NFKC and collapsed whitespace. */
+        fun normaliseText(text: String): String =
+            java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFKC)
+                .trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+
         private val generationLock = kotlinx.coroutines.sync.Mutex()
         private val _logs = MutableStateFlow<List<GenerationLogEntry>>(emptyList())
         val logs: StateFlow<List<GenerationLogEntry>> = _logs.asStateFlow()
@@ -112,7 +119,73 @@ class ElevenLabsService(private val context: Context) {
     fun getCachedFile(text: String, settings: ElevenLabsSettings): File? {
         val key = computeCacheKey(text, settings)
         val file = File(cacheDir, "el_$key.mp3")
-        return if (file.exists() && file.length() > 0) file else null
+        if (file.exists() && file.length() > 0) return file
+        return copyBundledHistoryClip(text, file)
+    }
+
+    /** Names recorded earlier in the ElevenLabs history ship inside the app (assets/voice_history). */
+    private fun copyBundledHistoryClip(text: String, target: File): File? {
+        val asset = bundledHistoryIndex()[normaliseText(text)] ?: return null
+        return try {
+            val temporary = File.createTempFile("bundled_", ".tmp", cacheDir)
+            try {
+                context.assets.open("voice_history/$asset").use { input ->
+                    temporary.outputStream().use { input.copyTo(it) }
+                }
+                if (temporary.length() == 0L || !temporary.renameTo(target)) return null
+            } finally { temporary.delete() }
+            target
+        } catch (_: java.io.IOException) { null }
+    }
+
+    private fun bundledHistoryIndex(): Map<String, String> {
+        bundledIndex?.let { return it }
+        val parsed = try {
+            val json = JSONObject(context.assets.open("voice_history/index.json").bufferedReader().use { it.readText() })
+            json.keys().asSequence().associate { normaliseText(it) to json.getString(it) }
+        } catch (_: Exception) { emptyMap() }
+        bundledIndex = parsed
+        return parsed
+    }
+
+    /**
+     * Looks for an earlier recording of exactly this text and voice in the account history,
+     * so a name that was generated before is downloaded instead of being paid for again.
+     */
+    private fun downloadFromHistory(text: String, apiKey: String, voiceId: String): ByteArray? {
+        val wanted = normaliseText(text)
+        var cursor: String? = null
+        repeat(20) {
+            val url = StringBuilder("https://api.elevenlabs.io/v1/history?page_size=100")
+                .append("&voice_id=").append(java.net.URLEncoder.encode(voiceId, "UTF-8"))
+                .append("&search=").append(java.net.URLEncoder.encode(text.trim(), "UTF-8"))
+            cursor?.let { url.append("&start_after_history_item_id=").append(java.net.URLEncoder.encode(it, "UTF-8")) }
+            val page = client.newCall(Request.Builder().url(url.toString()).addHeader("xi-api-key", apiKey).get().build())
+                .execute().use { response ->
+                    if (!response.isSuccessful) return null
+                    JSONObject(response.body?.string() ?: return null)
+                }
+            val items = page.optJSONArray("history") ?: return null
+            for (i in 0 until items.length()) {
+                val item = items.getJSONObject(i)
+                val source = item.optString("source", "TTS")
+                if (item.optString("voice_id") == voiceId && normaliseText(item.optString("text")) == wanted &&
+                    (source.isEmpty() || source == "TTS")
+                ) {
+                    val id = item.optString("history_item_id").ifEmpty { return null }
+                    val audioRequest = Request.Builder()
+                        .url("https://api.elevenlabs.io/v1/history/${java.net.URLEncoder.encode(id, "UTF-8")}/audio")
+                        .addHeader("xi-api-key", apiKey).get().build()
+                    return client.newCall(audioRequest).execute().use { audio ->
+                        if (audio.isSuccessful) audio.body?.bytes()?.takeIf { it.isNotEmpty() } else null
+                    }
+                }
+            }
+            val next = page.optString("last_history_item_id")
+            if (!page.optBoolean("has_more", false) || next.isEmpty() || next == cursor) return null
+            cursor = next
+        }
+        return null
     }
 
     fun isCached(text: String, settings: ElevenLabsSettings): Boolean {
@@ -214,6 +287,26 @@ class ElevenLabsService(private val context: Context) {
         try {
             val proxy = BuildConfig.VOICE_SERVICE_URL.trim()
             val useProxy = proxy.startsWith("https://")
+
+            if (!useProxy) {
+                val fromHistory = try {
+                    downloadFromHistory(cleanText, apiKey, settings.voiceId.trim())
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    Log.w("ElevenLabsService", "History lookup failed", e)
+                    null
+                }
+                if (fromHistory != null) {
+                    val temporary = File.createTempFile("history_", ".tmp", cacheDir)
+                    try {
+                        temporary.writeBytes(fromHistory)
+                        check(temporary.renameTo(outputFile)) { "تعذّر حفظ الصوت" }
+                    } finally { temporary.delete() }
+                    recordLog(cleanText, success = true, statusCode = 200, message = "تم استرجاع الصوت من سجل ElevenLabs بدون توليد جديد")
+                    return@withContext Result.success(outputFile)
+                }
+            }
             val url = if (useProxy) proxy else "https://api.elevenlabs.io/v1/text-to-speech/${settings.voiceId.trim()}"
 
             val jsonBody = JSONObject().apply {

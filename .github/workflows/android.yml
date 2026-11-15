@@ -2,7 +2,6 @@ name: Android checks
 on:
   pull_request:
   push:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,11 +28,16 @@ jobs:
           if [ -n "$ELEVENLABS_API_KEY" ]; then
             python3 scripts/generate_game_audio.py
             python3 scripts/generate_game_audio.py --check
+            python3 scripts/generate_game_audio.py --player-names
           else
             echo "Voice key is not configured; building an interface preview."
           fi
-      # The API key above belongs to that step only. It never reaches Gradle or the APK.
+      # The preview APK carries the key so that brand-new player names can be generated on the
+      # phone. Earlier names come from the bundled history clips and the account history first.
+      # Share this APK only with people you trust; anyone holding it can extract the key.
       - name: Build and check Android preview
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:

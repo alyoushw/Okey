@@ -90,6 +90,25 @@ class AudioReuseTests(unittest.TestCase):
                 self.assertEqual(b"saved", (directory / "one.mp3").read_bytes())
                 self.assertEqual(b"existing", (directory / "two.mp3").read_bytes())
 
+    def test_player_names_are_bundled_from_history_without_generating(self):
+        items = [
+            {"voice_id": audio.DEFAULT_VOICE_ID, "text": "يلا يا خالد، دورك", "history_item_id": "a", "source": "TTS"},
+            {"voice_id": audio.DEFAULT_VOICE_ID, "text": "  يلا يا خالد،   دورك ", "history_item_id": "older", "source": "TTS"},
+            {"voice_id": audio.DEFAULT_VOICE_ID, "text": "باقي عشر ثواني", "history_item_id": "b", "source": "TTS"},
+            {"voice_id": audio.DEFAULT_VOICE_ID, "text": "يلا، دورك", "history_item_id": "c", "source": "TTS"},
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            names, fixed = Path(folder) / "names", Path(folder) / "fixed"
+            fixed.mkdir()
+            (fixed / "manifest.json").write_text(json.dumps({"turn_start": "يلا، دورك"}, ensure_ascii=False))
+            with patch.object(audio, "NAMES", names), patch.object(audio, "AUDIO", fixed), \
+                    patch.object(audio.urllib.request, "urlopen", side_effect=[page(items), Response(b"khalid", "audio/mpeg")]) as request:
+                self.assertEqual(0, audio.bundle_player_names("test-only", audio.DEFAULT_VOICE_ID))
+                self.assertTrue(all(call.args[0].get_method() == "GET" for call in request.call_args_list))
+            index = json.loads((names / "index.json").read_text())
+            self.assertEqual(["يلا يا خالد، دورك"], list(index))
+            self.assertEqual(b"khalid", (names / index["يلا يا خالد، دورك"]).read_bytes())
+
 
 if __name__ == "__main__":
     unittest.main()
