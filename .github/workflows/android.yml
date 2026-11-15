@@ -58,8 +58,9 @@ jobs:
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --stacktrace
       # Direct download link that always points at the newest successful build:
       # https://github.com/alyoushw/Okey/releases/download/preview-latest/Okey.apk
+      # Only the trusted branches may replace what users download and get as an update.
       - name: Publish direct download link
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && (github.ref_name == 'main' || github.ref_name == 'ccr-38d80529-ie3z1v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
