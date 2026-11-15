@@ -125,7 +125,8 @@ class ElevenLabsService(private val context: Context) {
 
     /** Names recorded earlier in the ElevenLabs history ship inside the app (assets/voice_history). */
     private fun copyBundledHistoryClip(text: String, target: File): File? {
-        val asset = bundledHistoryIndex()[normaliseText(text)] ?: return null
+        val index = bundledHistoryIndex()
+        val asset = bundledPhrasings(normaliseText(text)).firstNotNullOfOrNull { index[it] } ?: return null
         return try {
             val temporary = File.createTempFile("bundled_", ".tmp", cacheDir)
             try {
@@ -136,6 +137,12 @@ class ElevenLabsService(private val context: Context) {
             } finally { temporary.delete() }
             target
         } catch (_: java.io.IOException) { null }
+    }
+
+    /** The exact phrase first, then older wordings of the same player's turn saved in the history. */
+    private fun bundledPhrasings(phrase: String): List<String> {
+        val name = Regex("^يلا يا (.+)، دورك$").find(phrase)?.groupValues?.get(1) ?: return listOf(phrase)
+        return listOf(phrase, "$name، جاء دورك", "يلا $name دورك")
     }
 
     private fun bundledHistoryIndex(): Map<String, String> {
