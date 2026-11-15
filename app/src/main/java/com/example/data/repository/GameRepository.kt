@@ -133,7 +133,8 @@ data class SettingsState(
     val voiceDialect: String = "NAJDI", // NAJDI, HIJAZI
     val voiceCountdownEnabled: Boolean = true,
     val masterVolume: Float = 1.0f,
-    val muteAll: Boolean = false
+    val muteAll: Boolean = false,
+    val victoryMusic: String = "drums_heroes" // id in assets/victory_music, "short_tune" or "none"
 )
 
 object SettingsRepository {
@@ -175,7 +176,8 @@ object SettingsRepository {
             voiceDialect = p.getString("voice_dialect", "NAJDI") ?: "NAJDI",
             voiceCountdownEnabled = p.getBoolean("voice_countdown_enabled", true),
             masterVolume = p.getFloat("master_volume", 1.0f),
-            muteAll = p.getBoolean("mute_all", false)
+            muteAll = p.getBoolean("mute_all", false),
+            victoryMusic = p.getString("victory_music", "drums_heroes") ?: "drums_heroes"
         )
     }
 
@@ -214,6 +216,7 @@ object SettingsRepository {
             ?.putBoolean("voice_countdown_enabled", settings.voiceCountdownEnabled)
             ?.putFloat("master_volume", settings.masterVolume)
             ?.putBoolean("mute_all", settings.muteAll)
+            ?.putString("victory_music", settings.victoryMusic)
             ?.commit() // Synchronous persistence guarantee
     }
 

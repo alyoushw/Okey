@@ -284,7 +284,16 @@ class ScoreboardViewModel(application: Application) : AndroidViewModel(applicati
         hapticUtil.vibrateVictory(settings.hapticEnabled)
         if (settings.soundEnabled && !settings.muteAll) {
             // "مبروك الفوز يا {الاسم}" first, then the celebration music.
-            val playMusic = { soundPlayer.playCelebrationFanfare(true, settings.masterVolume, false) }
+            val playMusic = {
+                when (settings.victoryMusic) {
+                    com.example.audio.VictoryMusic.NONE -> Unit
+                    com.example.audio.VictoryMusic.SHORT_TUNE ->
+                        soundPlayer.playCelebrationFanfare(true, settings.masterVolume, false)
+                    else -> if (!com.example.audio.VictoryMusic.play(getApplication(), settings.victoryMusic, settings.masterVolume)) {
+                        soundPlayer.playCelebrationFanfare(true, settings.masterVolume, false)
+                    }
+                }
+            }
             val soleWinner = results.filter { it.isWinner }.singleOrNull()
             val service = speechManager.elevenLabsService
             val named = soleWinner?.let { service.getCachedFile(victoryPhrase(it.name), service.getConfigManager().getSettings()) }

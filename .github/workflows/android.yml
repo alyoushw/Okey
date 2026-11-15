@@ -32,6 +32,23 @@ jobs:
           else
             echo "Voice key is not configured; building an interface preview."
           fi
+      # Victory music is generated once and kept in the music-pack release, so later builds reuse it for free.
+      - name: Restore or prepare victory music
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        run: |
+          folder=app/src/main/assets/victory_music
+          mkdir -p "$folder"
+          gh release download music-pack -p '*.mp3' -D "$folder" --clobber 2>/dev/null || echo "No saved music yet"
+          before=$(ls "$folder" | sort)
+          python3 scripts/generate_victory_music.py || echo "::warning::Some victory music could not be prepared"
+          new=$(comm -13 <(echo "$before") <(ls "$folder" | sort))
+          if [ -n "$new" ]; then
+            gh release view music-pack > /dev/null 2>&1 || gh release create music-pack --target "$GITHUB_SHA" --prerelease --latest=false --title "Okey music pack" --notes "Saved victory music, reused by every build."
+            for file in $new; do gh release upload music-pack "$folder/$file" --clobber; done
+          fi
       # The preview APK carries the key so that brand-new player names can be generated on the
       # phone. Earlier names come from the bundled history clips and the account history first.
       # Share this APK only with people you trust; anyone holding it can extract the key.

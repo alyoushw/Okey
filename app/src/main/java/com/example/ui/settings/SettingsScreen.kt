@@ -9,6 +9,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import com.example.audio.VictoryMusic
 import com.example.data.repository.SettingsState
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -70,6 +72,9 @@ fun SettingsScreen(
                 onSettingsChanged(currentSettings.copy(voiceTimeUpPenalty = it))
             }
         }
+        if (currentSettings.soundEnabled) {
+            VictoryMusicPicker(currentSettings, onSettingsChanged)
+        }
         HorizontalDivider()
         Text("أثناء اللعب", style = MaterialTheme.typography.titleMedium)
         SettingToggleRow("الاهتزاز", currentSettings.hapticEnabled) {
@@ -99,5 +104,44 @@ private fun SettingToggleRow(title: String, checked: Boolean, tag: String = "", 
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(title, modifier = Modifier.weight(1f).padding(end = 12.dp))
         Switch(checked = checked, onCheckedChange = onChange, modifier = Modifier.testTag(tag))
+    }
+}
+
+/** Choose the celebration music played after the winner is announced; ▶ previews it. */
+@Composable
+private fun VictoryMusicPicker(settings: SettingsState, onSettingsChanged: (SettingsState) -> Unit) {
+    val context = LocalContext.current
+    val tracks = remember { VictoryMusic.available(context) }
+    var previewing by remember { mutableStateOf<String?>(null) }
+    DisposableEffect(Unit) { onDispose { VictoryMusic.stop() } }
+    val options = tracks.map { it.id to it.title } +
+        listOf(VictoryMusic.SHORT_TUNE to "نغمة قصيرة", VictoryMusic.NONE to "بدون موسيقى")
+    val selected = settings.victoryMusic.takeIf { id -> options.any { it.first == id } }
+        ?: tracks.firstOrNull()?.id ?: VictoryMusic.SHORT_TUNE
+
+    HorizontalDivider()
+    Text("موسيقى الفوز", style = MaterialTheme.typography.titleMedium)
+    Text("تشتغل بعد «مبروك الفوز» في نهاية اللعبة", style = MaterialTheme.typography.bodySmall)
+    options.forEach { (id, title) ->
+        Row(
+            Modifier.fillMaxWidth().testTag("victory_music_$id"),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(
+                selected = selected == id,
+                onClick = { onSettingsChanged(settings.copy(victoryMusic = id)) }
+            )
+            Text(title, modifier = Modifier.weight(1f))
+            if (tracks.any { it.id == id }) {
+                TextButton(onClick = {
+                    if (previewing == id) {
+                        VictoryMusic.stop(); previewing = null
+                    } else {
+                        previewing = id
+                        VictoryMusic.play(context, id, settings.masterVolume) { previewing = null }
+                    }
+                }) { Text(if (previewing == id) "⏹ إيقاف" else "▶ تجربة") }
+            }
+        }
     }
 }
