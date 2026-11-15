@@ -48,11 +48,14 @@ jobs:
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk Okey.apk
           notes="آخر نسخة تجريبية — الفرع ${GITHUB_REF_NAME} — ${GITHUB_SHA::7}"
+          # The app reads version.json to offer the update; the first commit line is shown as its notes.
+          python3 -c 'import json,os,sys; json.dump({"versionCode": 100 + int(os.environ["GITHUB_RUN_NUMBER"]), "versionName": "1.2." + os.environ["GITHUB_RUN_NUMBER"], "notes": sys.argv[1]}, open("version.json", "w"), ensure_ascii=False)' "$(git log -1 --format="%(trailers:key=Notes-ar,valueonly)" | head -1)"
           if gh release view preview-latest > /dev/null 2>&1; then
             gh release upload preview-latest Okey.apk --clobber
+            gh release upload preview-latest version.json --clobber
             gh release edit preview-latest --notes "$notes"
           else
-            gh release create preview-latest Okey.apk --target "$GITHUB_SHA" --prerelease --latest=false --title "حاسبة Okey — آخر نسخة" --notes "$notes"
+            gh release create preview-latest Okey.apk version.json --target "$GITHUB_SHA" --prerelease --latest=false --title "حاسبة Okey — آخر نسخة" --notes "$notes"
           fi
       - uses: actions/upload-artifact@v4
         with:

@@ -71,6 +71,8 @@ fun MainAppScreen() {
             val scoreboardViewModel: ScoreboardViewModel = viewModel()
             val historyViewModel: HistoryViewModel = viewModel()
 
+            com.example.update.UpdateNotice()
+
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 bottomBar = {

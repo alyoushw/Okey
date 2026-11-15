@@ -20,8 +20,10 @@ android {
     applicationId = "com.aistudio.okeycompanion.vjkrp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "1.1"
+    // Every CI build gets a higher number, so the in-app updater can tell a newer build apart.
+    val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
+    versionCode = 100 + buildNumber
+    versionName = "1.2.$buildNumber"
     buildConfigField("String", "VOICE_SERVICE_URL", quoted(voiceSetting("VOICE_SERVICE_URL")))
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -30,6 +32,13 @@ android {
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
   // and updating Android apps in AI Studio.
   signingConfigs {
+    // One fixed key for preview builds, so each new APK installs over the previous one.
+    create("preview") {
+      storeFile = rootProject.file("signing/okey-preview.keystore")
+      storePassword = "android"
+      keyAlias = "okeypreview"
+      keyPassword = "android"
+    }
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
@@ -52,8 +61,7 @@ android {
     }
     debug {
       buildConfigField("String", "ELEVENLABS_API_KEY", quoted(voiceSetting("ELEVENLABS_API_KEY")))
-      // Standard Android debug key is generated locally; no private keystore is required.
-      signingConfig = signingConfigs.getByName("debug")
+      signingConfig = signingConfigs.getByName("preview")
     }
   }
   compileOptions {
