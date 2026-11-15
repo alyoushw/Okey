@@ -126,4 +126,18 @@ class PublicGameFlowTest {
             Dispatchers.resetMain()
         }
     }
+
+    @Test fun tappingThePlayerColourOpensChoicesAndKeepsThePick() {
+        var colors = emptyList<Long>()
+        compose.setContent {
+            MaterialTheme {
+                GameSetupScreen(emptyList(), { _, picked, _ -> colors = picked })
+            }
+        }
+        compose.onNodeWithTag("player_color_1").performClick()
+        compose.onNodeWithTag("color_choice_ffe91e63").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("color_choice_ffe91e63").assertDoesNotExist()
+        compose.onNodeWithTag("start_game_button").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(0xFFE91E63, colors[1]) }
+    }
 }

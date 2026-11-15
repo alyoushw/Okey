@@ -68,12 +68,14 @@ class ScoreboardViewModel(application: Application) : AndroidViewModel(applicati
         if (!preferences.soundEnabled || !preferences.voiceAnnouncePlayer || preferences.muteAll) return
         names.map(String::trim).filter { it.isNotEmpty() && it.length <= 30 }.distinct().forEach { name ->
             if (nameJobs[name]?.isActive == true) return@forEach
-            val phrase = getEffectiveTurnPhrase(name)
             val service = speechManager.elevenLabsService
             val settings = service.getConfigManager().getSettings()
-            if (service.isCached(phrase, settings) || !service.hasValidApiKey()) return@forEach
+            // The turn call and the victory call are both ready before the game needs them.
+            val phrases = listOf(getEffectiveTurnPhrase(name), victoryPhrase(name))
+                .filterNot { service.isCached(it, settings) }
+            if (phrases.isEmpty() || !service.hasValidApiKey()) return@forEach
             nameJobs[name] = viewModelScope.launch {
-                service.generateSpeech(phrase, settings)
+                phrases.forEach { service.generateSpeech(it, settings) }
             }
         }
     }
@@ -92,6 +94,8 @@ class ScoreboardViewModel(application: Application) : AndroidViewModel(applicati
         }
         loadGameState()
     }
+
+    private fun victoryPhrase(playerName: String): String = "مبروك الفوز يا ${playerName.trim()}"
 
     private fun getEffectiveTurnPhrase(playerName: String): String {
         val clean = playerName.trim()
@@ -277,10 +281,19 @@ class ScoreboardViewModel(application: Application) : AndroidViewModel(applicati
         val winnerScore = winner?.totalScore ?: 0
 
         val settings = repository.getSettings()
-        soundPlayer.playCelebrationFanfare(settings.soundEnabled, settings.masterVolume, settings.muteAll)
-        val customSlots = repository.getCustomSoundSlots(state.players)
-        speechManager.playVictory(customSlots, settings.masterVolume, settings.muteAll || !settings.soundEnabled)
         hapticUtil.vibrateVictory(settings.hapticEnabled)
+        if (settings.soundEnabled && !settings.muteAll) {
+            // "مبروك الفوز يا {الاسم}" first, then the celebration music.
+            val playMusic = { soundPlayer.playCelebrationFanfare(true, settings.masterVolume, false) }
+            val soleWinner = results.filter { it.isWinner }.singleOrNull()
+            val service = speechManager.elevenLabsService
+            val named = soleWinner?.let { service.getCachedFile(victoryPhrase(it.name), service.getConfigManager().getSettings()) }
+            if (named != null) {
+                speechManager.recorderHelper.playAudio(named.absolutePath, settings.masterVolume) { playMusic() }
+            } else {
+                speechManager.playVictory(repository.getCustomSoundSlots(state.players), settings.masterVolume, false) { playMusic() }
+            }
+        }
 
         enqueueWrite {
             repository.saveCompletedGame(

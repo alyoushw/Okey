@@ -51,7 +51,7 @@ class SoundPlayer(private val context: Context) {
                 soundClick = generateAndLoadWav("click.wav", freq = 900f, decay = 150.0, durationMs = 25)
                 soundClassic = generateAndLoadWav("classic.wav", freq = 1050f, decay = 55.0, durationMs = 40)
                 soundTimeUp = generateAndLoadTimeUpWav("time_up.wav")
-                soundFanfare = generateAndLoadFanfareWav("fanfare.wav")
+                soundFanfare = generateAndLoadFanfareWav("fanfare_v2.wav")
             } catch (e: Exception) {
                 Log.e("SoundPlayer", "Failed to init SoundPool sounds", e)
             }
@@ -151,22 +151,53 @@ class SoundPlayer(private val context: Context) {
         return soundPool.load(file.absolutePath, 1)
     }
 
+    /** A short triumphant brass-style tune (about four seconds) with bass and drum hits. */
     private fun generateAndLoadFanfareWav(filename: String): Int {
         val sampleRate = 22050
-        val durationMs = 650
-        val numSamples = (sampleRate * (durationMs / 1000.0)).toInt()
-        val pcm = ShortArray(numSamples)
-        for (i in 0 until numSamples) {
-            val t = i.toDouble() / sampleRate
-            val freq = when {
-                t < 0.15 -> 523.25 // C5
-                t < 0.30 -> 659.25 // E5
-                t < 0.45 -> 783.99 // G5
-                else -> 1046.50   // C6
+        val totalSec = 4.0
+        val mix = DoubleArray((sampleRate * totalSec).toInt())
+        val G4 = 392.0; val C5 = 523.25; val D5 = 587.33; val E5 = 659.25; val F5 = 698.46; val G5 = 783.99
+        val C3 = 130.81; val G2 = 98.0
+        // start, duration, frequency, loudness
+        val notes = listOf(
+            doubleArrayOf(0.00, 0.12, G4, 0.8), doubleArrayOf(0.14, 0.12, G4, 0.8), doubleArrayOf(0.28, 0.12, G4, 0.8),
+            doubleArrayOf(0.42, 0.55, C5, 1.0),
+            doubleArrayOf(1.00, 0.15, G4, 0.8), doubleArrayOf(1.17, 0.15, C5, 0.85),
+            doubleArrayOf(1.34, 0.55, E5, 1.0),
+            doubleArrayOf(1.92, 0.14, D5, 0.85), doubleArrayOf(2.08, 0.14, E5, 0.85), doubleArrayOf(2.24, 0.14, F5, 0.9),
+            doubleArrayOf(2.40, 1.45, G5, 1.0), doubleArrayOf(2.40, 1.45, E5, 0.55), doubleArrayOf(2.40, 1.45, C5, 0.5),
+            doubleArrayOf(0.42, 0.55, C3, 0.7), doubleArrayOf(1.34, 0.55, C3, 0.7),
+            doubleArrayOf(1.92, 0.46, G2, 0.7), doubleArrayOf(2.40, 1.45, C3, 0.8)
+        )
+        for (n in notes) {
+            val begin = (n[0] * sampleRate).toInt()
+            val length = (n[1] * sampleRate).toInt()
+            for (i in 0 until length) {
+                val index = begin + i
+                if (index >= mix.size) break
+                val t = i.toDouble() / sampleRate
+                val attack = (t / 0.015).coerceAtMost(1.0)
+                val release = ((n[1] - t) / 0.06).coerceIn(0.0, 1.0)
+                val body = if (t < 0.08) 1.0 - t * 3.0 else 0.76
+                val vibrato = if (t > 0.25) sin(2.0 * Math.PI * 5.5 * t) * 0.004 else 0.0
+                val phase = 2.0 * Math.PI * n[2] * (1.0 + vibrato) * t
+                val brass = sin(phase) + 0.55 * sin(2 * phase) + 0.35 * sin(3 * phase) + 0.2 * sin(4 * phase) + 0.1 * sin(5 * phase)
+                mix[index] += brass * attack * release * body * n[3]
             }
-            val env = if (t >= 0.45) (1.0 - ((t - 0.45) / 0.20)) else 0.9
-            val sample = sin(2.0 * Math.PI * freq * t) * env * Short.MAX_VALUE * 0.85
-            pcm[i] = sample.toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+        }
+        val random = java.util.Random(7)
+        for (hit in listOf(0.42, 1.34, 1.92, 2.24, 2.40, 2.40 + 0.09)) {
+            val begin = (hit * sampleRate).toInt()
+            for (i in 0 until (0.12 * sampleRate).toInt()) {
+                val index = begin + i
+                if (index >= mix.size) break
+                val t = i.toDouble() / sampleRate
+                mix[index] += (random.nextDouble() * 2 - 1) * exp(-t * 35.0) * 0.9 + sin(2 * Math.PI * 70 * t) * exp(-t * 18.0) * 1.4
+            }
+        }
+        val peak = mix.maxOf { kotlin.math.abs(it) }.coerceAtLeast(1e-6)
+        val pcm = ShortArray(mix.size) { i ->
+            (mix[i] / peak * Short.MAX_VALUE * 0.9).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
         }
         val file = File(context.cacheDir, filename)
         writePcmToWav(file, pcm, sampleRate)

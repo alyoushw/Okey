@@ -481,7 +481,7 @@ class GameRepository(val context: Context) {
                 title = "عبارة انتهاء الوقت",
                 description = "الجملة الفاصلة التي تُنطق في لحظة الصفر عند انتهاء وقت الدور",
                 category = SoundSlotCategory.TIME_UP,
-                customText = "انتهى الوقت، اسحب ثلاث"
+                customText = "اسحب ثلاث يا غشيم"
             )
         )
 
