@@ -107,41 +107,73 @@ private fun SettingToggleRow(title: String, checked: Boolean, tag: String = "", 
     }
 }
 
-/** Choose the celebration music played after the winner is announced; ▶ previews it. */
+/** One row in settings; tapping it opens the list of victory music with a description and a preview. */
 @Composable
 private fun VictoryMusicPicker(settings: SettingsState, onSettingsChanged: (SettingsState) -> Unit) {
     val context = LocalContext.current
-    val tracks = remember { VictoryMusic.available(context) }
+    val options = remember { VictoryMusic.available(context) + VictoryMusic.extras }
+    val selected = VictoryMusic.resolve(context, settings.victoryMusic)
+    var open by remember { mutableStateOf(false) }
     var previewing by remember { mutableStateOf<String?>(null) }
     DisposableEffect(Unit) { onDispose { VictoryMusic.stop() } }
-    val options = tracks.map { it.id to it.title } +
-        listOf(VictoryMusic.SHORT_TUNE to "نغمة قصيرة", VictoryMusic.NONE to "بدون موسيقى")
-    val selected = settings.victoryMusic.takeIf { id -> options.any { it.first == id } }
-        ?: tracks.firstOrNull()?.id ?: VictoryMusic.SHORT_TUNE
 
     HorizontalDivider()
-    Text("موسيقى الفوز", style = MaterialTheme.typography.titleMedium)
-    Text("تشتغل بعد «مبروك الفوز» في نهاية اللعبة", style = MaterialTheme.typography.bodySmall)
-    options.forEach { (id, title) ->
-        Row(
-            Modifier.fillMaxWidth().testTag("victory_music_$id"),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            RadioButton(
-                selected = selected == id,
-                onClick = { onSettingsChanged(settings.copy(victoryMusic = id)) }
-            )
-            Text(title, modifier = Modifier.weight(1f))
-            if (tracks.any { it.id == id }) {
-                TextButton(onClick = {
-                    if (previewing == id) {
-                        VictoryMusic.stop(); previewing = null
-                    } else {
-                        previewing = id
-                        VictoryMusic.play(context, id, settings.masterVolume) { previewing = null }
-                    }
-                }) { Text(if (previewing == id) "⏹ إيقاف" else "▶ تجربة") }
-            }
+    OutlinedButton(
+        onClick = { open = true },
+        modifier = Modifier.fillMaxWidth().testTag("victory_music_button")
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("موسيقى الفوز", style = MaterialTheme.typography.labelMedium)
+            Text(VictoryMusic.titleOf(context, settings.victoryMusic), style = MaterialTheme.typography.titleMedium)
         }
+        Text("تغيير ◂")
+    }
+
+    if (open) {
+        val close = { VictoryMusic.stop(); previewing = null; open = false }
+        AlertDialog(
+            onDismissRequest = close,
+            title = { Text("موسيقى الفوز") },
+            text = {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        "تشتغل الطبول ويقول المذيع «مبروك الفوز» باسم الفائز فوقها",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    options.forEach { track ->
+                        val isBeat = track.id != VictoryMusic.NONE && track.id != VictoryMusic.SHORT_TUNE
+                        Row(
+                            Modifier.fillMaxWidth().testTag("victory_music_${track.id}"),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selected == track.id,
+                                onClick = { onSettingsChanged(settings.copy(victoryMusic = track.id)) }
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(track.title, style = MaterialTheme.typography.titleSmall)
+                                Text(track.description, style = MaterialTheme.typography.bodySmall)
+                            }
+                            if (isBeat) {
+                                TextButton(onClick = {
+                                    if (previewing == track.id) {
+                                        VictoryMusic.stop(); previewing = null
+                                    } else {
+                                        previewing = track.id
+                                        VictoryMusic.preview(context, track.id, settings.masterVolume) {
+                                            if (previewing == track.id) previewing = null
+                                        }
+                                    }
+                                }) { Text(if (previewing == track.id) "⏹" else "▶ تجربة") }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = close) { Text("تم") } }
+        )
     }
 }

@@ -140,4 +140,19 @@ class PublicGameFlowTest {
         compose.onNodeWithTag("start_game_button").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(0xFFE91E63, colors[1]) }
     }
+
+    @Test fun victoryMusicOpensAsAListWithDescriptions() {
+        var saved = com.example.data.repository.SettingsState()
+        compose.setContent {
+            MaterialTheme {
+                com.example.ui.settings.SettingsScreen(saved, { saved = it })
+            }
+        }
+        compose.onNodeWithTag("victory_music_beat_zaffa").assertDoesNotExist()
+        compose.onNodeWithTag("victory_music_button").performScrollTo().performClick()
+        compose.onNodeWithTag("victory_music_beat_zaffa").assertIsDisplayed()
+        compose.onNodeWithTag("victory_music_beat_stadium_war").assertExists()
+        compose.onNodeWithTag("victory_music_beat_stadium_brass").assertExists()
+        compose.onNodeWithText("طبول ملعب ضخمة وبوق وجمهور يهدر").assertExists()
+    }
 }

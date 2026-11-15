@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 AUDIO = ROOT / "app/src/main/assets/game_audio"
 NAMES = ROOT / "app/src/main/assets/voice_history"
 NAME_SUFFIX = "دورك"
-VICTORY_PREFIX = "مبروك الفوز يا "
+VICTORY_PREFIX = "مبرو"
 MAX_NAME_CLIPS = 600
 
 
@@ -121,7 +121,7 @@ def bundle_player_names(key, voice_id):
     added = 0
     for item in iter_history(key, voice_id):
         text = normalise_text(item.get("text"))
-        if not (text.endswith(NAME_SUFFIX) or text.startswith(VICTORY_PREFIX)) or text in fixed or text in index:
+        if not (text.endswith(NAME_SUFFIX) or (text.startswith(VICTORY_PREFIX) and "الفوز يا" in text)) or text in fixed or text in index:
             continue
         if len(index) >= MAX_NAME_CLIPS or not item.get("history_item_id"):
             continue

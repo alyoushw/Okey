@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 data class ScoreboardUiState(
@@ -71,11 +72,11 @@ class ScoreboardViewModel(application: Application) : AndroidViewModel(applicati
             val service = speechManager.elevenLabsService
             val settings = service.getConfigManager().getSettings()
             // The turn call and the victory call are both ready before the game needs them.
-            val phrases = listOf(getEffectiveTurnPhrase(name), victoryPhrase(name))
-                .filterNot { service.isCached(it, settings) }
+            val phrases = listOf(getEffectiveTurnPhrase(name) to settings, victoryPhrase(name) to victoryVoice())
+                .filterNot { (text, voice) -> service.isCached(text, voice) }
             if (phrases.isEmpty() || !service.hasValidApiKey()) return@forEach
             nameJobs[name] = viewModelScope.launch {
-                phrases.forEach { service.generateSpeech(it, settings) }
+                phrases.forEach { (text, voice) -> service.generateSpeech(text, voice) }
             }
         }
     }
@@ -95,7 +96,11 @@ class ScoreboardViewModel(application: Application) : AndroidViewModel(applicati
         loadGameState()
     }
 
-    private fun victoryPhrase(playerName: String): String = "مبروك الفوز يا ${playerName.trim()}"
+    private fun victoryPhrase(playerName: String): String = "مبرووووك الفوز يا ${playerName.trim()}!"
+
+    /** Excited delivery for the winner's call (the approved samples used these settings). */
+    private fun victoryVoice() = speechManager.elevenLabsService.getConfigManager().getSettings()
+        .copy(stability = 0.25f, similarityBoost = 0.8f, style = 0.7f)
 
     private fun getEffectiveTurnPhrase(playerName: String): String {
         val clean = playerName.trim()
@@ -283,24 +288,26 @@ class ScoreboardViewModel(application: Application) : AndroidViewModel(applicati
         val settings = repository.getSettings()
         hapticUtil.vibrateVictory(settings.hapticEnabled)
         if (settings.soundEnabled && !settings.muteAll) {
-            // "مبروك الفوز يا {الاسم}" first, then the celebration music.
-            val playMusic = {
-                when (settings.victoryMusic) {
-                    com.example.audio.VictoryMusic.NONE -> Unit
-                    com.example.audio.VictoryMusic.SHORT_TUNE ->
-                        soundPlayer.playCelebrationFanfare(true, settings.masterVolume, false)
-                    else -> if (!com.example.audio.VictoryMusic.play(getApplication(), settings.victoryMusic, settings.masterVolume)) {
-                        soundPlayer.playCelebrationFanfare(true, settings.masterVolume, false)
-                    }
-                }
-            }
+            val app = getApplication<Application>()
+            val music = com.example.audio.VictoryMusic
+            val choice = music.resolve(app, settings.victoryMusic)
             val soleWinner = results.filter { it.isWinner }.singleOrNull()
             val service = speechManager.elevenLabsService
-            val named = soleWinner?.let { service.getCachedFile(victoryPhrase(it.name), service.getConfigManager().getSettings()) }
-            if (named != null) {
-                speechManager.recorderHelper.playAudio(named.absolutePath, settings.masterVolume) { playMusic() }
-            } else {
-                speechManager.playVictory(repository.getCustomSoundSlots(state.players), settings.masterVolume, false) { playMusic() }
+            val named = soleWinner?.let { service.getCachedFile(victoryPhrase(it.name), victoryVoice()) }
+            // The winner's call (or the generic "مبروك الفوز" when the name is not ready).
+            val sayCongrats: (() -> Unit) -> Unit = { done ->
+                if (named != null) speechManager.recorderHelper.playAudio(named.absolutePath, settings.masterVolume) { done() }
+                else speechManager.playVictory(repository.getCustomSoundSlots(state.players), settings.masterVolume, false) { done() }
+            }
+            when (choice) {
+                music.NONE -> sayCongrats {}
+                music.SHORT_TUNE -> sayCongrats { soundPlayer.playCelebrationFanfare(true, settings.masterVolume, false) }
+                else -> if (music.playBeat(app, choice, settings.masterVolume)) {
+                    // Drums first, then the call over the beat.
+                    viewModelScope.launch { delay(music.VOICE_DELAY_MS); sayCongrats {} }
+                } else {
+                    sayCongrats { soundPlayer.playCelebrationFanfare(true, settings.masterVolume, false) }
+                }
             }
         }
 
