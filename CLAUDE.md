@@ -13,3 +13,8 @@
 - In-app updates: the app reads `version.json` from the `preview-latest` release and offers the new APK.
   Add a `Notes-ar:` trailer to the commit message (one Arabic line) to show what changed in the update dialog.
   Preview builds are signed with `signing/okey-preview.keystore` so updates install over the old app.
+- **Never ship a new sound without the owner's approval.** Generate candidates with
+  `.github/workflows/music-samples.yml` (they go to the `music-samples` release, not the app), send them to the
+  owner to listen to, and only add the approved ones to the app.
+- App builds and updates run only when app files change (see the `paths` filter in `android.yml`), so samples,
+  posters and notes never send users an update.
