@@ -349,8 +349,13 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 val settings = _uiState.value.settings
                 val slots = _uiState.value.customSoundSlots
 
-                val isCritical = currentSec in 1..5
+                // "Final five seconds" toggle owns every special effect of seconds 5..1:
+                // spoken numbers, accelerated/louder urgent ticks and the strong vibration.
+                // When it is off those seconds behave like any ordinary second.
+                val finalFiveEnabled = settings.soundEnabled && !settings.muteAll && settings.voiceCountdownEnabled
+                val isCritical = currentSec in 1..5 && finalFiveEnabled
                 val isElevated = currentSec in 6..10
+                val escalating = settings.tickSoundMode == "ESCALATING"
 
                 // 10 seconds warning announcement
                 if (currentSec == 10 && lastSpokenSecond != 10 && settings.soundEnabled && settings.warningSoundEnabled) {
@@ -363,7 +368,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 // Voice countdown for numbers 5 down to 1
-                if (currentSec in 1..5 && currentSec != lastSpokenSecond && settings.soundEnabled && settings.voiceCountdownEnabled) {
+                if (isCritical && currentSec != lastSpokenSecond) {
                     lastSpokenSecond = currentSec
                     speechManager.playCountdownNumber(
                         number = currentSec,
@@ -378,10 +383,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 // 4..5s: 2 ticks/sec (500ms)
                 // 1..3s: 3 ticks/sec (333ms)
                 val now = android.os.SystemClock.elapsedRealtime()
-                val tickIntervalMs = if (settings.tickSoundMode == "ESCALATING") {
+                val tickIntervalMs = if (escalating) {
                     when {
-                        currentSec in 1..3 -> 333L // 3 ticks/sec
-                        currentSec in 4..5 -> 500L // 2 ticks/sec
+                        isCritical && currentSec in 1..3 -> 333L // 3 ticks/sec
+                        isCritical && currentSec in 4..5 -> 500L // 2 ticks/sec
                         else -> 1000L              // 1 tick/sec
                     }
                 } else {
@@ -393,20 +398,20 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                     lastEmittedSecond = currentSec
 
                     // Escalating volume & pitch calculation
-                    val volumeFactor = if (settings.tickSoundMode == "ESCALATING") {
+                    val volumeFactor = if (escalating) {
                         when {
-                            currentSec in 1..5 -> 0.70f + ((5 - currentSec) / 4.0f) * 0.30f
-                            currentSec in 6..10 -> 0.25f + ((10 - currentSec) / 4.0f) * 0.30f
+                            isCritical -> 0.70f + ((5 - currentSec) / 4.0f) * 0.30f
+                            isElevated -> 0.25f + ((10 - currentSec) / 4.0f) * 0.30f
                             else -> 0.25f
                         }
                     } else {
                         0.60f
                     }
 
-                    val pitchFactor = if (settings.tickSoundMode == "ESCALATING") {
+                    val pitchFactor = if (escalating) {
                         when {
-                            currentSec in 1..5 -> 1.15f + ((5 - currentSec) * 0.03f)
-                            currentSec in 6..10 -> 1.0f + ((10 - currentSec) * 0.02f)
+                            isCritical -> 1.15f + ((5 - currentSec) * 0.03f)
+                            isElevated -> 1.0f + ((10 - currentSec) * 0.02f)
                             else -> 1.0f
                         }
                     } else {
